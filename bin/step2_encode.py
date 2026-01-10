@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Step 2: Context Encoding
-Loads Image Encoder, VAE, and PointMapVAE sequentially (not simultaneously).
-Generates video embeddings, video latents, and prior latents.
-Saves results to disk and exits to free VRAM.
+Step 2: Context Encoding (Per-Frame)
+Processes each frame individually through CLIP, VAE, and PointMapVAE.
+Saves per-frame latents to minimize VRAM usage.
 """
 
 import argparse
@@ -30,105 +29,86 @@ def resize_with_antialiasing(image, size):
     return F.interpolate(image, size, mode='bicubic', align_corners=False, antialias=True)
 
 
-def encode_video_embeddings(video, image_encoder, feature_extractor, chunk_size=14):
-    """Encode video frames to image embeddings using CLIP."""
+def encode_frame_embedding(frame, image_encoder, feature_extractor):
+    """Encode a single frame to CLIP embedding."""
     # Resize to 224x224 for CLIP
-    video_224 = resize_with_antialiasing(video.float(), (224, 224))
-    video_224 = (video_224 + 1.0) / 2.0  # [-1, 1] -> [0, 1]
+    frame_224 = resize_with_antialiasing(frame.float(), (224, 224))
+    frame_224 = (frame_224 + 1.0) / 2.0  # [-1, 1] -> [0, 1]
 
-    embeddings = []
-    for i in range(0, video_224.shape[0], chunk_size):
-        end_idx = min(i + chunk_size, video_224.shape[0])
-        chunk = video_224[i:end_idx]
+    # Preprocess and encode
+    inputs = feature_extractor(
+        images=frame_224,
+        do_normalize=True,
+        do_center_crop=False,
+        do_resize=False,
+        do_rescale=False,
+        return_tensors="pt",
+    ).pixel_values.to(frame.device, dtype=frame.dtype)
 
-        # Preprocess and encode
-        inputs = feature_extractor(
-            images=chunk,
-            do_normalize=True,
-            do_center_crop=False,
-            do_resize=False,
-            do_rescale=False,
-            return_tensors="pt",
-        ).pixel_values.to(video.device, dtype=video.dtype)
-
-        emb = image_encoder(inputs).image_embeds
-        embeddings.append(emb)
-
-    embeddings = torch.cat(embeddings, dim=0)
-    return embeddings
+    emb = image_encoder(inputs).image_embeds
+    return emb.cpu()
 
 
-def encode_vae_video(video, vae, chunk_size=14):
-    """Encode video frames to VAE latents."""
-    video_latents = []
-    for i in range(0, video.shape[0], chunk_size):
-        end_idx = min(i + chunk_size, video.shape[0])
-        chunk = video[i:end_idx]
-
-        latent = vae.encode(chunk).latent_dist.mode()
-        video_latents.append(latent)
-
-    video_latents = torch.cat(video_latents, dim=0)
-    return video_latents
+def encode_frame_vae(frame, vae):
+    """Encode a single frame to VAE latent."""
+    latent = vae.encode(frame.to(vae.dtype)).latent_dist.mode()
+    return latent.cpu()
 
 
-def encode_point_map(point_map_vae, vae, disparity, valid_mask, point_map, intrinsic_map, chunk_size=8):
-    """Encode geometry priors to latent space using PointMapVAE."""
-    T, _, H, W = point_map.shape
-    latents = []
+def encode_frame_prior(disparity, valid_mask, point_map, intrinsic_map, point_map_vae, vae, device):
+    """Encode geometry prior for a single frame using PointMapVAE."""
+    # All inputs: [H, W] or [C, H, W]
 
     # Create pseudo-image from disparity
-    pseudo_image = disparity[:, None].repeat(1, 3, 1, 1)
+    pseudo_image = disparity.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # [1, 3, H, W]
 
     # Extract focal length magnitude from intrinsic map
-    intrinsic_map = torch.norm(intrinsic_map[:, 2:4], p=2, dim=1, keepdim=False)
+    intrinsic_scalar = torch.norm(intrinsic_map[2:4], p=2, dim=0, keepdim=False)  # [H, W]
 
-    for i in range(0, T, chunk_size):
-        end_idx = min(i + chunk_size, T)
+    # First encode pseudo-image with VAE
+    latent_dist = vae.encode(pseudo_image.to(device, dtype=vae.dtype)).latent_dist
 
-        # First encode pseudo-image with VAE
-        latent_dist = vae.encode(pseudo_image[i:end_idx].to(dtype=vae.dtype)).latent_dist
+    # Then encode with PointMapVAE
+    prior_input = torch.cat([
+        intrinsic_scalar.unsqueeze(0).unsqueeze(0),  # [1, 1, H, W]
+        point_map[2:3].unsqueeze(0),                  # [1, 1, H, W]
+        disparity.unsqueeze(0).unsqueeze(0),          # [1, 1, H, W]
+        valid_mask.unsqueeze(0).unsqueeze(0),         # [1, 1, H, W]
+    ], dim=1).to(device)  # [1, 4, H, W]
 
-        # Then encode with PointMapVAE
-        latent_dist = point_map_vae.encode(
-            torch.cat([
-                intrinsic_map[i:end_idx, None],
-                point_map[i:end_idx, 2:3],
-                disparity[i:end_idx, None],
-                valid_mask[i:end_idx, None],
-            ], dim=1),
-            latent_dist
-        )
+    latent_dist = point_map_vae.encode(prior_input, latent_dist)
 
-        if hasattr(latent_dist, 'mode'):
-            latent = latent_dist.mode()
-        else:
-            latent = latent_dist
+    if hasattr(latent_dist, 'mode'):
+        latent = latent_dist.mode()
+    else:
+        latent = latent_dist
 
-        latents.append(latent)
-
-    latents = torch.cat(latents, dim=0)
-    latents = latents * vae.config.scaling_factor
-    return latents
+    latent = latent * vae.config.scaling_factor
+    return latent.squeeze(0).cpu()  # [C, H/8, W/8]
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Step 2: Encode Context')
+    parser = argparse.ArgumentParser(description='Step 2: Encode Context (Per-Frame)')
     parser.add_argument('--video_path', type=str, required=True, help='Input video path')
-    parser.add_argument('--priors_path', type=str, required=True, help='Input priors .pt file from Step 1')
+    parser.add_argument('--priors_dir', type=str, required=True, help='Input directory with per-frame priors from Step 1')
     parser.add_argument('--video_info_path', type=str, required=True, help='Input video info .pt file')
-    parser.add_argument('--output_path', type=str, required=True, help='Output .pt file for context')
+    parser.add_argument('--output_dir', type=str, required=True, help='Output directory for per-frame context')
     parser.add_argument('--cache_dir', type=str, default='workspace/cache', help='Model cache directory')
-    parser.add_argument('--decode_chunk_size', type=int, default=8, help='Chunk size for processing')
 
     args = parser.parse_args()
 
     print("="*60)
-    print("Step 2: Context Encoding")
+    print("Step 2: Context Encoding (Per-Frame)")
     print("="*60)
 
     device = 'cuda'
     dtype = torch.float16
+
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    priors_dir = Path(args.priors_dir)
 
     # Load video info
     print(f"Loading video info from {args.video_info_path}...")
@@ -139,14 +119,7 @@ def main():
     need_resize = video_info['need_resize']
     downsample_ratio = video_info['downsample_ratio']
 
-    # Load priors
-    print(f"Loading priors from {args.priors_path}...")
-    priors = torch.load(args.priors_path)
-    pred_disparity = priors['disparity']
-    pred_valid_mask = priors['valid_mask']
-    pred_point_map = priors['point_map']
-    pred_intrinsic_map = priors['intrinsic_map']
-    print(f"  Loaded priors: {list(pred_disparity.shape)}")
+    print(f"  Processing {num_frames} frames at {height}x{width}")
 
     # Load video frames
     print(f"Loading video: {args.video_path}")
@@ -172,13 +145,12 @@ def main():
         ).clamp(0, 1)
 
     # Convert to [-1, 1] range
-    video = frames_tensor.to(device=device, dtype=dtype)
-    video = video * 2.0 - 1.0
+    frames_tensor = frames_tensor * 2.0 - 1.0
 
-    print(f"Video tensor shape: {list(video.shape)}")
+    print(f"Video tensor shape: {list(frames_tensor.shape)}")
 
     # ==================================================
-    # ENCODING PART 1: Image Embeddings (CLIP)
+    # ENCODING PART 1: Image Embeddings (CLIP) - Per Frame
     # ==================================================
     print("\n[Encoding 1/3] Loading Image Encoder (CLIP)...")
     feature_extractor = CLIPImageProcessor.from_pretrained(
@@ -193,21 +165,27 @@ def main():
         cache_dir=args.cache_dir
     ).to(device)
 
-    print("  Generating video embeddings...")
-    with torch.inference_mode():
-        video_embeddings = encode_video_embeddings(
-            video, image_encoder, feature_extractor,
-            chunk_size=args.decode_chunk_size
-        ).unsqueeze(0)  # [1, T, 1024]
+    print("  Generating per-frame video embeddings...")
+    for i in range(num_frames):
+        frame = frames_tensor[i:i+1].to(device, dtype=dtype)  # [1, C, H, W]
 
-    print(f"  Video embeddings shape: {list(video_embeddings.shape)}")
+        with torch.inference_mode():
+            embedding = encode_frame_embedding(frame, image_encoder, feature_extractor)
+
+        # Save immediately
+        embed_path = output_dir / f"frame_{i:05d}_embed.pt"
+        torch.save(embedding, embed_path)
+
+        if (i + 1) % 10 == 0:
+            print(f"    Processed {i+1}/{num_frames} frames")
 
     # Free memory
     del image_encoder, feature_extractor
     torch.cuda.empty_cache()
+    print("  CLIP encoder unloaded")
 
     # ==================================================
-    # ENCODING PART 2: VAE Latents
+    # ENCODING PART 2: VAE Latents - Per Frame
     # ==================================================
     print("\n[Encoding 2/3] Loading VAE...")
     vae = AutoencoderKLTemporalDecoder.from_pretrained(
@@ -222,19 +200,24 @@ def main():
     if needs_upcasting:
         vae.to(dtype=torch.float32)
 
-    print("  Encoding video to VAE latents...")
-    with torch.inference_mode():
-        video_latents = encode_vae_video(
-            video.to(vae.dtype), vae,
-            chunk_size=args.decode_chunk_size
-        ).unsqueeze(0).to(video_embeddings.dtype)  # [1, T, C, H, W]
+    print("  Encoding per-frame VAE latents...")
+    for i in range(num_frames):
+        frame = frames_tensor[i:i+1].to(device, dtype=vae.dtype)  # [1, C, H, W]
 
-    print(f"  Video latents shape: {list(video_latents.shape)}")
+        with torch.inference_mode():
+            latent = encode_frame_vae(frame, vae)
+
+        # Save immediately
+        latent_path = output_dir / f"frame_{i:05d}_vae_latent.pt"
+        torch.save(latent, latent_path)
+
+        if (i + 1) % 10 == 0:
+            print(f"    Processed {i+1}/{num_frames} frames")
 
     # Don't free VAE yet - needed for PointMapVAE encoding
 
     # ==================================================
-    # ENCODING PART 3: Prior Latents (PointMapVAE)
+    # ENCODING PART 3: Prior Latents (PointMapVAE) - Per Frame
     # ==================================================
     print("\n[Encoding 3/3] Loading PointMapVAE...")
     point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
@@ -245,18 +228,29 @@ def main():
         cache_dir=args.cache_dir
     ).to(device)
 
-    print("  Encoding geometry priors to latent space...")
-    with torch.inference_mode():
-        prior_latents = encode_point_map(
-            point_map_vae, vae,
-            pred_disparity.to(device),
-            pred_valid_mask.to(device),
-            pred_point_map.to(device),
-            pred_intrinsic_map.to(device),
-            chunk_size=args.decode_chunk_size
-        ).unsqueeze(0).to(video_embeddings.dtype)  # [1, T, C, H, W]
+    print("  Encoding per-frame prior latents...")
+    for i in range(num_frames):
+        # Load priors for this frame
+        prior_path = priors_dir / f"frame_{i:05d}_prior.pt"
+        prior_data = torch.load(prior_path)
 
-    print(f"  Prior latents shape: {list(prior_latents.shape)}")
+        pred_disparity = prior_data['disparity']      # [H, W]
+        pred_valid_mask = prior_data['valid_mask']    # [H, W]
+        pred_point_map = prior_data['point_map']      # [3, H, W]
+        pred_intrinsic_map = prior_data['intrinsic_map']  # [4, H, W]
+
+        with torch.inference_mode():
+            prior_latent = encode_frame_prior(
+                pred_disparity, pred_valid_mask, pred_point_map, pred_intrinsic_map,
+                point_map_vae, vae, device
+            )
+
+        # Save immediately
+        prior_latent_path = output_dir / f"frame_{i:05d}_prior_latent.pt"
+        torch.save(prior_latent, prior_latent_path)
+
+        if (i + 1) % 10 == 0:
+            print(f"    Processed {i+1}/{num_frames} frames")
 
     # Cast VAE back if needed
     if needs_upcasting:
@@ -265,21 +259,14 @@ def main():
     # Free memory
     del vae, point_map_vae
     torch.cuda.empty_cache()
+    print("  VAE and PointMapVAE unloaded")
 
-    # ==================================================
-    # Save Context to Disk
-    # ==================================================
-    print(f"\nSaving context to {args.output_path}...")
-    torch.save({
-        'video_embeddings': video_embeddings.cpu(),
-        'video_latents': video_latents.cpu(),
-        'prior_latents': prior_latents.cpu(),
-    }, args.output_path)
-
-    print("Step 2 complete!")
-    print(f"  Embeddings: {list(video_embeddings.shape)}")
-    print(f"  Video latents: {list(video_latents.shape)}")
-    print(f"  Prior latents: {list(prior_latents.shape)}")
+    print("\nStep 2 complete!")
+    print(f"  Saved {num_frames} per-frame encoding files to {output_dir}")
+    print(f"  Files per frame:")
+    print(f"    - frame_XXXXX_embed.pt (CLIP embedding)")
+    print(f"    - frame_XXXXX_vae_latent.pt (VAE latent)")
+    print(f"    - frame_XXXXX_prior_latent.pt (Prior latent)")
 
 
 if __name__ == '__main__':
