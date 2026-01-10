@@ -169,16 +169,20 @@ def load_context_frames(context_dir, frame_indices, device, dtype):
     prior_latents = []
 
     for idx in frame_indices:
-        # Load embeddings - already has shape [1, 1024] from step2
+        # Load embeddings - shape [1, 1024] from step2
         embed = torch.load(context_dir / f"frame_{idx:05d}_embed.pt")
         embeddings.append(embed.squeeze(0).to(device, dtype=dtype))  # Remove batch dim -> [1024]
 
-        # Load VAE latents - shape [C, H, W] from step2
+        # Load VAE latents - may be [1, C, H, W] or [C, H, W]
         vae_lat = torch.load(context_dir / f"frame_{idx:05d}_vae_latent.pt")
+        if vae_lat.dim() == 4:  # [1, C, H, W]
+            vae_lat = vae_lat.squeeze(0)  # Remove batch dim -> [C, H, W]
         vae_latents.append(vae_lat.to(device, dtype=dtype))
 
-        # Load prior latents - shape [C, H, W] from step2
+        # Load prior latents - may be [1, C, H, W] or [C, H, W]
         prior_lat = torch.load(context_dir / f"frame_{idx:05d}_prior_latent.pt")
+        if prior_lat.dim() == 4:  # [1, C, H, W]
+            prior_lat = prior_lat.squeeze(0)  # Remove batch dim -> [C, H, W]
         prior_latents.append(prior_lat.to(device, dtype=dtype))
 
     # Stack and add batch dimension
