@@ -1,0 +1,214 @@
+GeometryCrafter Low-Memory Pipeline Architecture
+================================================
+
+OVERVIEW:
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Original run.py (24-32GB VRAM)         Low-Memory Pipeline (14-16GB)    │
+├───────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────┐        ┌─────────────────────────────┐  │
+│  │  All Models Loaded:         │        │  Sequential Execution:      │  │
+│  │  • MoGe                     │        │  Step 1: MoGe only          │  │
+│  │  • CLIP Encoder             │        │  Step 2: Encoders only      │  │
+│  │  • VAE                      │        │  Step 3: UNet only          │  │
+│  │  • PointMapVAE              │        │  Step 4: Decoder only       │  │
+│  │  • UNet                     │        │                             │  │
+│  │  ────────────────────       │        │  ───────────────────        │  │
+│  │  Total: ~24-32GB VRAM       │        │  Peak: ~14-16GB VRAM        │  │
+│  └─────────────────────────────┘        └─────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────────┘
+
+
+STEP-BY-STEP FLOW:
+==================
+
+Input: video.mp4 (T frames, H×W resolution)
+    │
+    ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ STEP 1: Geometry Priors (step1_priors.py)                            │
+├───────────────────────────────────────────────────────────────────────┤
+│ Models:  MoGe (Monocular Geometry Estimator)                         │
+│ VRAM:    ~4-6 GB                                                      │
+│                                                                       │
+│ Process:                                                              │
+│   • Load video frames                                                │
+│   • Run MoGe on each frame                                           │
+│   • Generate disparity maps                                          │
+│   • Generate validity masks                                          │
+│   • Compute 3D point maps                                            │
+│   • Compute camera intrinsics                                        │
+│                                                                       │
+│ Output:  priors.pt                                                    │
+│   ├─ disparity:     [T, H, W]          (normalized depth)            │
+│   ├─ valid_mask:    [T, H, W]          (valid regions)               │
+│   ├─ point_map:     [T, 3, H, W]       (x/z, y/z, log(z))            │
+│   └─ intrinsic_map: [T, 4, H, W]       (camera parameters)           │
+│                                                                       │
+│          video_info.pt                                                │
+│   └─ Metadata: dimensions, flags, etc.                               │
+└───────────────────────────────────────────────────────────────────────┘
+    │ (Save to disk, unload MoGe, free VRAM)
+    ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ STEP 2: Context Encoding (step2_encode.py)                           │
+├───────────────────────────────────────────────────────────────────────┤
+│ Models:  CLIP Image Encoder → VAE → PointMapVAE (sequential)         │
+│ VRAM:    ~6-8 GB (peak, only one model loaded at a time)             │
+│                                                                       │
+│ Process:                                                              │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ 2a. CLIP Image Encoder                                      │   │
+│   │     • Load CLIP encoder                                     │   │
+│   │     • Resize frames to 224×224                              │   │
+│   │     • Extract image embeddings                              │   │
+│   │     • Unload CLIP encoder                                   │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ 2b. VAE Encoder                                             │   │
+│   │     • Load VAE                                              │   │
+│   │     • Encode frames to latent space                         │   │
+│   │     • Keep VAE loaded for next step                         │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │ 2c. PointMapVAE Encoder                                     │   │
+│   │     • Load PointMapVAE                                      │   │
+│   │     • Encode geometry priors using VAE + PointMapVAE        │   │
+│   │     • Unload both VAE and PointMapVAE                       │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│                                                                       │
+│ Output:  context.pt                                                   │
+│   ├─ video_embeddings: [1, T, 1024]       (CLIP features)            │
+│   ├─ video_latents:    [1, T, C, H/8, W/8] (VAE latents)             │
+│   └─ prior_latents:    [1, T, C, H/8, W/8] (geometry latents)        │
+└───────────────────────────────────────────────────────────────────────┘
+    │ (Save to disk, unload all models, free VRAM)
+    ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ STEP 3: Denoising (step3_denoise.py)                    ⚠ VRAM HEAVY │
+├───────────────────────────────────────────────────────────────────────┤
+│ Models:  UNet + Scheduler                                             │
+│ VRAM:    ~12-16 GB (highest of all steps)                             │
+│                                                                       │
+│ Process:                                                              │
+│   • Load UNet model (largest component)                              │
+│   • Load context from Step 2                                         │
+│   • Initialize noise latents                                         │
+│   • Sliding window processing:                                       │
+│     ┌────────────────────────────────────────────────────────┐       │
+│     │  For each window (size W, overlap O):                 │       │
+│     │    • Prepare conditioning (embeddings + latents)      │       │
+│     │    • Iterative denoising (num_inference_steps):       │       │
+│     │      ┌─────────────────────────────────────────────┐  │       │
+│     │      │ For each timestep:                          │  │       │
+│     │      │   • Concatenate: noise + video + prior      │  │       │
+│     │      │   • UNet forward pass                       │  │       │
+│     │      │   • [Optional] Classifier-free guidance     │  │       │
+│     │      │   • Scheduler step (denoise)                │  │       │
+│     │      └─────────────────────────────────────────────┘  │       │
+│     │    • Blend overlapping regions                        │       │
+│     │    • Concatenate to output                            │       │
+│     └────────────────────────────────────────────────────────┘       │
+│                                                                       │
+│ Output:  denoised.pt                                                  │
+│   └─ latents: [T, C, H/8, W/8]  (denoised latent representation)     │
+└───────────────────────────────────────────────────────────────────────┘
+    │ (Save to disk, unload UNet, free VRAM)
+    ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ STEP 4: Decoding (step4_decode.py)                                   │
+├───────────────────────────────────────────────────────────────────────┤
+│ Models:  PointMapVAE Decoder                                          │
+│ VRAM:    ~4-6 GB                                                      │
+│                                                                       │
+│ Process:                                                              │
+│   • Load PointMapVAE decoder                                         │
+│   • Load denoised latents from Step 3                                │
+│   • Decode to geometry maps:                                         │
+│     ├─ intrinsic_maps (camera parameters)                            │
+│     ├─ depth_maps (log-space depth)                                  │
+│     └─ valid_masks (validity)                                        │
+│   • Resize to original resolution if needed                          │
+│   • Reconstruct 3D point maps:                                       │
+│     ├─ Create mesh grid                                              │
+│     ├─ Apply camera intrinsics                                       │
+│     ├─ Convert log-depth to depth                                    │
+│     └─ Compute 3D coordinates (x, y, z)                              │
+│   • Apply projection constraints                                     │
+│                                                                       │
+│ Output:  video.npz                                                    │
+│   ├─ point_map: [T, H, W, 3]  (3D points, float16)                   │
+│   └─ mask:      [T, H, W]     (validity, bool)                       │
+└───────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+Final Output: video.npz
+    ├─ 3D point cloud for each frame
+    └─ Valid region masks
+
+
+MEMORY PROFILE OVER TIME:
+=========================
+
+VRAM
+ 16GB ┤                    ╭────────────╮
+      │                    │  UNet Step │
+      │                    │   (Peak)   │
+ 12GB ┤                    │            │
+      │                    │            │
+  8GB ┤      ╭───╮    ╭───╯            ╰───╮
+      │      │ 2 │    │                    │
+  4GB ┤  ╭───╯   ╰────╯                    ╰───╮
+      │  │ 1 │                                 │ 4 │
+  0GB ┴──┴───┴─────────────────────────────────┴───┴──> Time
+         Step 1   Step 2      Step 3         Step 4
+        (MoGe) (Encoders)    (UNet)       (Decoder)
+
+
+DISK I/O:
+=========
+
+Temporary Files Created:
+  • video_priors.pt       (~500MB - 2GB per video)
+  • video_context.pt      (~1GB - 3GB per video)
+  • video_denoised.pt     (~500MB - 2GB per video)
+  • video_video_info.pt   (~1KB)
+  ────────────────────────────────────────────────
+  Total:                  ~2GB - 7GB per video
+
+Files are automatically cleaned up after successful pipeline completion.
+
+
+CONFIGURATION PARAMETERS:
+=========================
+
+Memory Optimization:
+  --window_size         ↓ Lower = Less VRAM, slower (sliding window size)
+  --decode_chunk_size   ↓ Lower = Less VRAM, slower (batch size)
+  --guidance_scale 1.0  ↓ Disables CFG = ~30% less VRAM in Step 3
+  --downsample_ratio    ↑ Higher = Less VRAM, lower quality
+
+Quality vs Speed:
+  --num_inference_steps ↑ More steps = Better quality, slower
+  --window_size         ↑ Larger windows = Better temporal consistency
+  --overlap             ↑ More overlap = Smoother blending, slower
+
+Resolution:
+  --height, --width     Must be divisible by 64
+                        Higher resolution = More VRAM + slower
+
+
+COMPARISON TABLE:
+=================
+
+┌──────────────────┬─────────────────┬────────────────────┐
+│     Metric       │  Original       │  Low-Memory        │
+├──────────────────┼─────────────────┼────────────────────┤
+│ Peak VRAM        │ ~24-32 GB       │ ~14-16 GB          │
+│ Total VRAM       │ All models      │ One model at a time│
+│ Speed            │ Faster (100%)   │ Slower (~80-90%)   │
+│ Disk I/O         │ None            │ ~2-7 GB temp files │
+│ Modularity       │ Single script   │ 4 independent steps│
+│ Resume-able      │ No              │ Yes (from any step)│
+│ Output Quality   │ Baseline        │ Identical          │
+│ Debugging        │ Harder          │ Easier (per-step)  │
+└──────────────────┴─────────────────┴────────────────────┘

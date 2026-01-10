@@ -1,0 +1,176 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                 GeometryCrafter Low-Memory Pipeline                       ║
+║                         Quick Reference Card                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+BASIC USAGE:
+───────────────────────────────────────────────────────────────────────────
+./bin/run_geocrafter.sh --video_path video.mp4
+
+
+ESSENTIAL OPTIONS:
+───────────────────────────────────────────────────────────────────────────
+--video_path PATH          Input video (required)
+--output_dir DIR           Output directory (default: workspace/output)
+--height H                 Target height, divisible by 64 (default: auto)
+--width W                  Target width, divisible by 64 (default: auto)
+--num_inference_steps N    Denoising steps: 3=fast, 5=balanced, 10=quality
+
+
+MEMORY OPTIMIZATION:
+───────────────────────────────────────────────────────────────────────────
+--window_size SIZE         Sliding window (default: 110)
+                           ↓ Lower = Less VRAM | ↑ Higher = Better quality
+
+--decode_chunk_size N      Batch size (default: 8)
+                           ↓ Lower = Less VRAM | ↑ Higher = Faster
+
+--guidance_scale 1.0       Disable CFG to save ~30% VRAM in Step 3
+
+--downsample_ratio RATIO   Process at lower res (default: 1.0)
+                           2.0 = half resolution = much less VRAM
+
+
+QUALITY TUNING:
+───────────────────────────────────────────────────────────────────────────
+--num_inference_steps 10   More steps = better quality (slower)
+--guidance_scale 2.0       Higher guidance = more detail (more VRAM)
+--overlap 25               Larger overlap = smoother blending
+
+
+COMMON SCENARIOS:
+───────────────────────────────────────────────────────────────────────────
+
+1. Default (balanced):
+   ./bin/run_geocrafter.sh --video_path video.mp4
+
+2. Maximum quality (needs more VRAM):
+   ./bin/run_geocrafter.sh --video_path video.mp4 \
+       --num_inference_steps 10 --guidance_scale 2.0
+
+3. Minimum VRAM (slower):
+   ./bin/run_geocrafter.sh --video_path video.mp4 \
+       --window_size 60 --decode_chunk_size 4 --guidance_scale 1.0
+
+4. Fast preview:
+   ./bin/run_geocrafter.sh --video_path video.mp4 \
+       --num_inference_steps 3 --process_length 50
+
+5. High-res video (4K):
+   ./bin/run_geocrafter.sh --video_path 4k.mp4 \
+       --downsample_ratio 2.0 --height 512 --width 896
+
+
+TROUBLESHOOTING:
+───────────────────────────────────────────────────────────────────────────
+
+Out of Memory Error:
+  1. Reduce --window_size (try 80, 60, or 40)
+  2. Reduce --decode_chunk_size (try 4 or 2)
+  3. Set --guidance_scale 1.0
+  4. Use --downsample_ratio 2.0
+
+Slow Performance:
+  1. Use SSD for --temp_dir
+  2. Reduce --num_inference_steps
+  3. Increase --decode_chunk_size (if VRAM allows)
+
+Poor Quality:
+  1. Increase --num_inference_steps (try 10)
+  2. Increase --guidance_scale (try 2.0)
+  3. Reduce --downsample_ratio (use 1.0)
+  4. Check input video quality
+
+
+UTILITIES:
+───────────────────────────────────────────────────────────────────────────
+./bin/test_pipeline.sh           # Validate setup
+./bin/cleanup_temp.sh            # Clean temp files
+nvidia-smi                       # Monitor VRAM usage
+
+
+VRAM REQUIREMENTS BY STEP:
+───────────────────────────────────────────────────────────────────────────
+Step 1: MoGe                     ~4-6 GB
+Step 2: Encoders (sequential)    ~6-8 GB
+Step 3: UNet (peak)              ~12-16 GB  ⚠
+Step 4: Decoder                  ~4-6 GB
+
+
+FILE LOCATIONS:
+───────────────────────────────────────────────────────────────────────────
+Input:   --video_path
+Output:  {output_dir}/{video_name}.npz
+Temp:    {temp_dir}/{video_name}_*.pt (auto-cleaned)
+Cache:   {cache_dir}/ (HuggingFace models)
+
+
+OUTPUT FORMAT:
+───────────────────────────────────────────────────────────────────────────
+{video_name}.npz:
+  - point_map: [T, H, W, 3]  3D coordinates (x, y, z) in float16
+  - mask:      [T, H, W]     Valid regions in bool
+
+Load with:
+  import numpy as np
+  data = np.load('output.npz')
+  points = data['point_map']  # Shape: (frames, height, width, 3)
+  mask = data['mask']         # Shape: (frames, height, width)
+
+
+PARAMETER PRESETS:
+───────────────────────────────────────────────────────────────────────────
+
+FAST:
+  --num_inference_steps 3 --window_size 60 --guidance_scale 1.0
+
+BALANCED (default):
+  --num_inference_steps 5 --window_size 110 --guidance_scale 1.0
+
+QUALITY:
+  --num_inference_steps 10 --window_size 110 --guidance_scale 2.0
+
+LOW_VRAM:
+  --window_size 40 --decode_chunk_size 2 --guidance_scale 1.0 \
+  --downsample_ratio 2.0
+
+
+GETTING HELP:
+───────────────────────────────────────────────────────────────────────────
+./bin/run_geocrafter.sh --help           # Full options list
+cat bin/README.md                        # Detailed documentation
+cat bin/EXAMPLES.md                      # Usage examples
+cat bin/PIPELINE_DIAGRAM.txt             # Architecture diagram
+
+
+SYSTEM REQUIREMENTS:
+───────────────────────────────────────────────────────────────────────────
+• Python 3.8+
+• CUDA GPU with 16GB+ VRAM
+• ~5-10 GB free disk space (for temp files)
+• Linux or WSL (Windows)
+
+Dependencies:
+  pip install torch diffusers transformers decord kornia
+
+
+PERFORMANCE TIPS:
+───────────────────────────────────────────────────────────────────────────
+✓ Use SSD for --temp_dir
+✓ Start with short videos to test settings
+✓ Monitor VRAM with nvidia-smi
+✓ Lower resolution = faster + less VRAM
+✓ Disable CFG (--guidance_scale 1.0) to save VRAM
+✗ Don't use CPU (not supported)
+
+
+VERSION INFO:
+───────────────────────────────────────────────────────────────────────────
+Pipeline:     Low-Memory GeometryCrafter
+Strategy:     Load-Run-Dump-Kill (sequential model loading)
+VRAM Target:  16GB systems
+Compatibility: Same output format as original run.py
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  For complete documentation, see bin/README.md                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
