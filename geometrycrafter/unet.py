@@ -325,13 +325,13 @@ class UNetSpatioTemporalConditionModelVid2vid(
                         encoder_hidden_states=encoder_hidden_states,
                         image_only_indicator=image_only_indicator,
                     )
-                    else:
-                        sample = upsample_block(
-                            hidden_states=sample,
-                            res_hidden_states_tuple=res_samples,
-                            temb=emb,
-                            image_only_indicator=image_only_indicator,
-                        )
+                else:
+                    sample = upsample_block(
+                        hidden_states=sample,
+                        res_hidden_states_tuple=res_samples,
+                        temb=emb,
+                        image_only_indicator=image_only_indicator,
+                    )
                 _to_offload(upsample_block)
 
         # 6. post-process
