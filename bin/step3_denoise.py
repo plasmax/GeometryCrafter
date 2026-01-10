@@ -221,6 +221,19 @@ def main():
         action='store_true',
         help='Enable sequential CPU offload for UNet to shrink peak VRAM (slower, needs accelerate).'
     )
+    parser.add_argument(
+        '--residual_offload',
+        type=str,
+        default='none',
+        choices=['none', 'cpu', 'disk'],
+        help='Offload UNet residual connections to reduce VRAM. "cpu" uses pinned CPU memory (faster), "disk" uses disk storage (minimal RAM).'
+    )
+    parser.add_argument(
+        '--residual_cache_dir',
+        type=str,
+        default=None,
+        help='Directory for disk-based residual cache. Only used if --residual_offload=disk.'
+    )
 
     args = parser.parse_args()
 
@@ -303,6 +316,15 @@ def main():
         print("  Using default attention (no memory optimizations)")
 
     setup_attention()
+
+    # Enable residual offloading to reduce VRAM during forward pass
+    if args.residual_offload != 'none':
+        unet.enable_residual_offload(
+            mode=args.residual_offload,
+            cache_dir=args.residual_cache_dir,
+            pin_memory=True
+        )
+        print(f"  Residual offload enabled (mode={args.residual_offload})")
 
     # Optional CPU offload for weights (helps 16GB cards)
     if args.cpu_offload:
