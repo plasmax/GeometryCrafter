@@ -95,7 +95,7 @@ def denoise_latents(
         # Load context for this window only (on-demand)
         print(f"  Loading context for frames {idx_start}-{idx_end-1}...")
         frame_indices = list(range(idx_start, idx_end))
-        video_embeddings_current, video_latents_current, prior_latents_current = load_context_frames(
+        video_embeddings_current, prior_latents_current = load_context_frames(
             context_dir, frame_indices, device, dtype
         )
 
@@ -112,7 +112,7 @@ def denoise_latents(
                 # Prepare model input
                 latent_model_input = scheduler.scale_model_input(latents, t)
                 latent_model_input = torch.cat(
-                    [latent_model_input, video_latents_current, prior_latents_current], dim=2
+                    [latent_model_input, prior_latents_current], dim=2
                 )
 
                 # Predict noise
@@ -129,7 +129,6 @@ def denoise_latents(
                     latent_model_input_uncond = scheduler.scale_model_input(latents, t)
                     latent_model_input_uncond = torch.cat(
                         [latent_model_input_uncond,
-                         torch.zeros_like(video_latents_current),
                          torch.zeros_like(prior_latents_current)],
                         dim=2,
                     )
@@ -165,19 +164,12 @@ def denoise_latents(
 def load_context_frames(context_dir, frame_indices, device, dtype):
     """Load per-frame context files for specified frame indices."""
     embeddings = []
-    vae_latents = []
     prior_latents = []
 
     for idx in frame_indices:
         # Load embeddings - shape [1, 1024] from step2
         embed = torch.load(context_dir / f"frame_{idx:05d}_embed.pt")
         embeddings.append(embed.squeeze(0).to(device, dtype=dtype))  # Remove batch dim -> [1024]
-
-        # Load VAE latents - may be [1, C, H, W] or [C, H, W]
-        vae_lat = torch.load(context_dir / f"frame_{idx:05d}_vae_latent.pt")
-        if vae_lat.dim() == 4:  # [1, C, H, W]
-            vae_lat = vae_lat.squeeze(0)  # Remove batch dim -> [C, H, W]
-        vae_latents.append(vae_lat.to(device, dtype=dtype))
 
         # Load prior latents - may be [1, C, H, W] or [C, H, W]
         prior_lat = torch.load(context_dir / f"frame_{idx:05d}_prior_latent.pt")
@@ -187,10 +179,9 @@ def load_context_frames(context_dir, frame_indices, device, dtype):
 
     # Stack and add batch dimension
     video_embeddings = torch.stack(embeddings, dim=0).unsqueeze(0)  # [1, T, 1024]
-    video_latents = torch.stack(vae_latents, dim=0).unsqueeze(0)     # [1, T, C, H, W]
     prior_latents = torch.stack(prior_latents, dim=0).unsqueeze(0)   # [1, T, C, H, W]
 
-    return video_embeddings, video_latents, prior_latents
+    return video_embeddings, prior_latents
 
 
 def main():
