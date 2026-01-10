@@ -2,6 +2,9 @@
 # GeometryCrafter Low-Memory Pipeline Orchestrator
 # This script runs the inference pipeline in isolated steps to minimize VRAM usage
 
+# Debug mode - set DEBUG_MODE=true to pause before cleanup on error
+DEBUG_MODE="${DEBUG_MODE:-false}"
+
 set -e  # Exit on error
 
 # Parse arguments
@@ -117,6 +120,15 @@ VIDEO_INFO_FILE="$TEMP_DIR/${VIDEO_BASENAME}_video_info.pt"
 
 # Cleanup function
 cleanup() {
+    if [ "$DEBUG_MODE" = "true" ]; then
+        echo ""
+        echo "========================================"
+        echo "ERROR OCCURRED - Debug Mode Active"
+        echo "========================================"
+        echo "Intermediate files preserved in: $TEMP_DIR"
+        echo "Press ENTER to cleanup and exit, or Ctrl+C to keep files..."
+        read -r
+    fi
     echo ""
     echo "Cleaning up intermediate files..."
     rm -rf "$PRIORS_DIR" "$CONTEXT_DIR"
