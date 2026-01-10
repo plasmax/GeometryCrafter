@@ -209,6 +209,18 @@ def main():
     parser.add_argument('--overlap', type=int, default=25, help='Window overlap')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--model_type', type=str, default='diff', choices=['diff', 'determ'], help='Model type')
+    parser.add_argument(
+        '--attention_mode',
+        type=str,
+        default='auto',
+        choices=['auto', 'xformers', 'sdpa', 'slicing', 'none'],
+        help='Memory-saving attention backend. auto tries xformers -> sdpa -> slicing.'
+    )
+    parser.add_argument(
+        '--cpu_offload',
+        action='store_true',
+        help='Enable sequential CPU offload for UNet to shrink peak VRAM (slower, needs accelerate).'
+    )
 
     args = parser.parse_args()
 
@@ -217,7 +229,7 @@ def main():
     print("="*60)
 
     set_seed(args.seed)
-    device = 'cuda'
+    device = torch.device('cuda')
     dtype = torch.float16
 
     context_dir = Path(args.context_dir)
@@ -247,12 +259,62 @@ def main():
         low_cpu_mem_usage=True,
         torch_dtype=dtype,
         cache_dir=args.cache_dir
-    ).to(device)
+    )
     unet.requires_grad_(False)
 
     # Enable gradient checkpointing to reduce activation memory (works in inference mode now)
     unet.enable_gradient_checkpointing()
     print("  UNet loaded with gradient checkpointing enabled (reduces VRAM by ~40%)")
+
+    # Configure attention backend for lower VRAM
+    def setup_attention():
+        if args.attention_mode in ('auto', 'xformers'):
+            try:
+                unet.enable_xformers_memory_efficient_attention()
+                print("  Using xFormers memory-efficient attention")
+                return
+            except Exception as e:
+                if args.attention_mode == 'xformers':
+                    print(f"  xFormers requested but unavailable: {e}")
+                elif args.attention_mode == 'auto':
+                    print(f"  xFormers unavailable, falling back (reason: {e})")
+        if args.attention_mode in ('auto', 'sdpa'):
+            try:
+                from diffusers.models.attention_processor import AttnProcessor2_0
+
+                unet.set_attn_processor(AttnProcessor2_0())
+                print("  Using PyTorch 2.x scaled dot-product attention (SDPA)")
+                return
+            except Exception as e:
+                if args.attention_mode == 'sdpa':
+                    print(f"  SDPA requested but unavailable: {e}")
+                elif args.attention_mode == 'auto':
+                    print(f"  SDPA unavailable, falling back (reason: {e})")
+        if args.attention_mode in ('auto', 'slicing'):
+            try:
+                unet.enable_attention_slicing()
+                print("  Attention slicing enabled (lower VRAM, slower)")
+                return
+            except Exception as e:
+                if args.attention_mode == 'slicing':
+                    print(f"  Attention slicing requested but unavailable: {e}")
+                elif args.attention_mode == 'auto':
+                    print(f"  Attention slicing unavailable (reason: {e})")
+        print("  Using default attention (no memory optimizations)")
+
+    setup_attention()
+
+    # Optional CPU offload for weights (helps 16GB cards)
+    if args.cpu_offload:
+        try:
+            gpu_id = device.index if device.index is not None else 0
+            unet.enable_sequential_cpu_offload(gpu_id=gpu_id)
+            print("  Sequential CPU offload enabled for UNet weights")
+        except Exception as e:
+            print(f"  CPU offload requested but unavailable: {e}")
+            unet = unet.to(device)
+    else:
+        unet = unet.to(device)
 
     # Load scheduler
     print("Loading scheduler...")
