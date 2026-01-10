@@ -9,11 +9,44 @@ from diffusers.utils import is_torch_version
 class UNetSpatioTemporalConditionModelVid2vid(
     UNetSpatioTemporalConditionModel
 ):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._block_cpu_offload = False
+        self._main_device = None
+        self._offload_device = torch.device("cpu")
+
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
 
     def disable_gradient_checkpointing(self):
         self.gradient_checkpointing = False
+
+    def _iter_offloadable_modules(self):
+        return [
+            self.conv_in,
+            *self.down_blocks,
+            self.mid_block,
+            *self.up_blocks,
+            self.conv_norm_out,
+            self.conv_out,
+        ]
+
+    def enable_block_cpu_offload(self, main_device="cuda", offload_device="cpu"):
+        """Lightweight weight offload: keep blocks on CPU, stream to GPU one-at-a-time.
+
+        This mirrors sequential CPU offload without requiring accelerate.ModelHook.
+        """
+        self._block_cpu_offload = True
+        self._main_device = torch.device(main_device)
+        self._offload_device = torch.device(offload_device)
+
+        # Move heavy blocks to offload device up front to keep VRAM free.
+        for module in self._iter_offloadable_modules():
+            module.to(self._offload_device)
+
+        # Keep small time embedding layers on main device to avoid repeated transfers.
+        for small in (self.time_proj, self.time_embedding, self.add_time_proj, self.add_embedding):
+            small.to(self._main_device)
 
     def forward(
         self,
@@ -67,12 +100,28 @@ class UNetSpatioTemporalConditionModelVid2vid(
         encoder_hidden_states = encoder_hidden_states.flatten(0, 1).unsqueeze(1)
 
         # 2. pre-process
+        block_offload = self._block_cpu_offload
+        main_device = self._main_device if self._main_device is not None else sample.device
+        offload_device = self._offload_device if hasattr(self, "_offload_device") else torch.device("cpu")
+
+        def _to_main(module):
+            if block_offload:
+                module.to(main_device)
+
+        def _to_offload(module):
+            if block_offload:
+                module.to(offload_device)
+                if main_device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+        _to_main(self.conv_in)
         sample = sample.to(dtype=self.conv_in.weight.dtype)
         assert sample.dtype == self.conv_in.weight.dtype, (
             f"sample.dtype: {sample.dtype}, "
             f"self.conv_in.weight.dtype: {self.conv_in.weight.dtype}"
         )
         sample = self.conv_in(sample)
+        _to_offload(self.conv_in)
 
         image_only_indicator = torch.zeros(
             batch_size, num_frames, dtype=sample.dtype, device=sample.device
@@ -90,6 +139,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
             if is_torch_version(">=", "1.11.0"):
 
                 for downsample_block in self.down_blocks:
+                    _to_main(downsample_block)
                     if (
                         hasattr(downsample_block, "has_cross_attention")
                         and downsample_block.has_cross_attention
@@ -110,9 +160,11 @@ class UNetSpatioTemporalConditionModelVid2vid(
                             image_only_indicator,
                             use_reentrant=False,
                         )
+                    _to_offload(downsample_block)
                     down_block_res_samples += res_samples
 
                 # 4. mid
+                _to_main(self.mid_block)
                 sample = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(self.mid_block),
                     sample,
@@ -121,6 +173,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
                     image_only_indicator,
                     use_reentrant=False,
                 )
+                _to_offload(self.mid_block)
 
                 # 5. up
                 for i, upsample_block in enumerate(self.up_blocks):
@@ -129,6 +182,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
                         : -len(upsample_block.resnets)
                     ]
 
+                    _to_main(upsample_block)
                     if (
                         hasattr(upsample_block, "has_cross_attention")
                         and upsample_block.has_cross_attention
@@ -151,9 +205,11 @@ class UNetSpatioTemporalConditionModelVid2vid(
                             image_only_indicator,
                             use_reentrant=False,
                         )
+                    _to_offload(upsample_block)
             else:
 
                 for downsample_block in self.down_blocks:
+                    _to_main(downsample_block)
                     if (
                         hasattr(downsample_block, "has_cross_attention")
                         and downsample_block.has_cross_attention
@@ -172,9 +228,11 @@ class UNetSpatioTemporalConditionModelVid2vid(
                             emb,
                             image_only_indicator,
                         )
+                    _to_offload(downsample_block)
                     down_block_res_samples += res_samples
 
                 # 4. mid
+                _to_main(self.mid_block)
                 sample = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(self.mid_block),
                     sample,
@@ -182,6 +240,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
                     encoder_hidden_states,
                     image_only_indicator,
                 )
+                _to_offload(self.mid_block)
 
                 # 5. up
                 for i, upsample_block in enumerate(self.up_blocks):
@@ -190,6 +249,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
                         : -len(upsample_block.resnets)
                     ]
 
+                    _to_main(upsample_block)
                     if (
                         hasattr(upsample_block, "has_cross_attention")
                         and upsample_block.has_cross_attention
@@ -210,9 +270,11 @@ class UNetSpatioTemporalConditionModelVid2vid(
                             emb,
                             image_only_indicator,
                         )
+                    _to_offload(upsample_block)
 
         else:
             for downsample_block in self.down_blocks:
+                _to_main(downsample_block)
                 if (
                     hasattr(downsample_block, "has_cross_attention")
                     and downsample_block.has_cross_attention
@@ -231,15 +293,18 @@ class UNetSpatioTemporalConditionModelVid2vid(
                         image_only_indicator=image_only_indicator,
                     )
 
+                _to_offload(downsample_block)
                 down_block_res_samples += res_samples
 
             # 4. mid
+            _to_main(self.mid_block)
             sample = self.mid_block(
                 hidden_states=sample,
                 temb=emb,
                 encoder_hidden_states=encoder_hidden_states,
                 image_only_indicator=image_only_indicator,
             )
+            _to_offload(self.mid_block)
 
             # 5. up
             for i, upsample_block in enumerate(self.up_blocks):
@@ -248,6 +313,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
                     : -len(upsample_block.resnets)
                 ]
 
+                _to_main(upsample_block)
                 if (
                     hasattr(upsample_block, "has_cross_attention")
                     and upsample_block.has_cross_attention
@@ -259,18 +325,23 @@ class UNetSpatioTemporalConditionModelVid2vid(
                         encoder_hidden_states=encoder_hidden_states,
                         image_only_indicator=image_only_indicator,
                     )
-                else:
-                    sample = upsample_block(
-                        hidden_states=sample,
-                        res_hidden_states_tuple=res_samples,
-                        temb=emb,
-                        image_only_indicator=image_only_indicator,
-                    )
+                    else:
+                        sample = upsample_block(
+                            hidden_states=sample,
+                            res_hidden_states_tuple=res_samples,
+                            temb=emb,
+                            image_only_indicator=image_only_indicator,
+                        )
+                _to_offload(upsample_block)
 
         # 6. post-process
+        _to_main(self.conv_norm_out)
+        _to_main(self.conv_out)
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
+        _to_offload(self.conv_norm_out)
+        _to_offload(self.conv_out)
 
         # 7. Reshape back to original shape
         sample = sample.reshape(batch_size, num_frames, *sample.shape[1:])

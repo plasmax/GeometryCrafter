@@ -306,13 +306,26 @@ def main():
 
     # Optional CPU offload for weights (helps 16GB cards)
     if args.cpu_offload:
-        try:
-            gpu_id = device.index if device.index is not None else 0
-            unet.enable_sequential_cpu_offload(gpu_id=gpu_id)
-            print("  Sequential CPU offload enabled for UNet weights")
-        except Exception as e:
-            print(f"  CPU offload requested but unavailable: {e}")
-            unet = unet.to(device)
+        gpu_id = device.index if device.index is not None else 0
+        if hasattr(unet, "enable_sequential_cpu_offload"):
+            try:
+                unet.enable_sequential_cpu_offload(gpu_id=gpu_id)
+                print("  Sequential CPU offload enabled for UNet weights")
+            except Exception as e:
+                print(f"  Sequential CPU offload unavailable, falling back to block-wise offload: {e}")
+                try:
+                    unet.enable_block_cpu_offload(main_device=device, offload_device="cpu")
+                    print("  Block-wise CPU offload enabled for UNet weights")
+                except Exception as e2:
+                    print(f"  Block-wise CPU offload unavailable: {e2}")
+                    unet = unet.to(device)
+        else:
+            try:
+                unet.enable_block_cpu_offload(main_device=device, offload_device="cpu")
+                print("  Block-wise CPU offload enabled for UNet weights")
+            except Exception as e:
+                print(f"  CPU offload requested but unavailable: {e}")
+                unet = unet.to(device)
     else:
         unet = unet.to(device)
 
