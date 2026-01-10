@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Step 3: Denoising with UNet
+Step 3: Denoising with UNet (Per-Frame Context Loading)
 This is the VRAM-intensive step. Only loads UNet and scheduler.
-Performs iterative denoising of latents using context from Step 2.
+Loads context files on-demand per sliding window to minimize VRAM usage.
 Saves denoised latents to disk and exits to free VRAM.
 """
 
@@ -50,18 +50,17 @@ def denoise_latents(
     unet,
     scheduler,
     latents_init,
-    video_embeddings,
-    video_latents,
-    prior_latents,
+    context_dir,
     added_time_ids,
     num_inference_steps,
     guidance_scale,
     window_size,
     overlap,
     num_frames,
-    device
+    device,
+    dtype
 ):
-    """Perform denoising with sliding window."""
+    """Perform denoising with sliding window, loading context per-window."""
     stride = window_size - overlap
     latents_all = None
     idx_start = 0
@@ -93,10 +92,12 @@ def denoise_latents(
             [latents_init[:, -overlap:], latents_init[:, :stride]], dim=1
         )
 
-        # Get context for this window
-        video_latents_current = video_latents[:, idx_start:idx_end]
-        prior_latents_current = prior_latents[:, idx_start:idx_end]
-        video_embeddings_current = video_embeddings[:, idx_start:idx_end]
+        # Load context for this window only (on-demand)
+        print(f"  Loading context for frames {idx_start}-{idx_end-1}...")
+        frame_indices = list(range(idx_start, idx_end))
+        video_embeddings_current, video_latents_current, prior_latents_current = load_context_frames(
+            context_dir, frame_indices, device, dtype
+        )
 
         # Denoising loop
         with tqdm(total=num_inference_steps, desc=f"Window {idx_start//stride + 1}") as pbar:
@@ -161,9 +162,36 @@ def denoise_latents(
     return latents_all
 
 
+def load_context_frames(context_dir, frame_indices, device, dtype):
+    """Load per-frame context files for specified frame indices."""
+    embeddings = []
+    vae_latents = []
+    prior_latents = []
+
+    for idx in frame_indices:
+        # Load embeddings
+        embed = torch.load(context_dir / f"frame_{idx:05d}_embed.pt")
+        embeddings.append(embed.to(device, dtype=dtype))
+
+        # Load VAE latents
+        vae_lat = torch.load(context_dir / f"frame_{idx:05d}_vae_latent.pt")
+        vae_latents.append(vae_lat.to(device, dtype=dtype))
+
+        # Load prior latents
+        prior_lat = torch.load(context_dir / f"frame_{idx:05d}_prior_latent.pt")
+        prior_latents.append(prior_lat.to(device, dtype=dtype))
+
+    # Stack and add batch dimension
+    video_embeddings = torch.stack(embeddings, dim=0).unsqueeze(0)  # [1, T, 1024]
+    video_latents = torch.stack(vae_latents, dim=0).unsqueeze(0)     # [1, T, C, H, W]
+    prior_latents = torch.stack(prior_latents, dim=0).unsqueeze(0)   # [1, T, C, H, W]
+
+    return video_embeddings, video_latents, prior_latents
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Step 3: Denoise Latents with UNet')
-    parser.add_argument('--context_path', type=str, required=True, help='Input context .pt file from Step 2')
+    parser = argparse.ArgumentParser(description='Step 3: Denoise Latents with UNet (Per-Frame)')
+    parser.add_argument('--context_dir', type=str, required=True, help='Input context directory from Step 2')
     parser.add_argument('--video_info_path', type=str, required=True, help='Input video info .pt file')
     parser.add_argument('--output_path', type=str, required=True, help='Output .pt file for denoised latents')
     parser.add_argument('--cache_dir', type=str, default='workspace/cache', help='Model cache directory')
@@ -177,12 +205,14 @@ def main():
     args = parser.parse_args()
 
     print("="*60)
-    print("Step 3: Denoising with UNet (VRAM Intensive)")
+    print("Step 3: Denoising with UNet (VRAM Intensive) - Per-Frame Mode")
     print("="*60)
 
     set_seed(args.seed)
     device = 'cuda'
     dtype = torch.float16
+
+    context_dir = Path(args.context_dir)
 
     # Load video info
     print(f"Loading video info from {args.video_info_path}...")
@@ -199,16 +229,7 @@ def main():
         overlap = 0
         print(f"Adjusted window_size={window_size}, overlap={overlap} (video fits in one window)")
 
-    # Load context
-    print(f"Loading context from {args.context_path}...")
-    context = torch.load(args.context_path)
-    video_embeddings = context['video_embeddings'].to(device, dtype=dtype)
-    video_latents = context['video_latents'].to(device, dtype=dtype)
-    prior_latents = context['prior_latents'].to(device, dtype=dtype)
-
-    print(f"  Video embeddings: {list(video_embeddings.shape)}")
-    print(f"  Video latents: {list(video_latents.shape)}")
-    print(f"  Prior latents: {list(prior_latents.shape)}")
+    print(f"Will load context per-frame from {context_dir} ({num_frames} frames total)")
 
     # Load UNet (the big model)
     print(f"\nLoading UNet ({args.model_type})...")
@@ -266,16 +287,15 @@ def main():
             unet=unet,
             scheduler=scheduler,
             latents_init=latents_init,
-            video_embeddings=video_embeddings,
-            video_latents=video_latents,
-            prior_latents=prior_latents,
+            context_dir=context_dir,
             added_time_ids=added_time_ids,
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale,
             window_size=window_size,
             overlap=overlap,
             num_frames=num_frames,
-            device=device
+            device=device,
+            dtype=dtype
         )
 
     # Get scaling factor from a temporary VAE config

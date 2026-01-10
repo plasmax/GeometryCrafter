@@ -161,26 +161,20 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# NOTE: Steps 3 and 4 would need to be updated to load per-frame files
-# For now, they are commented out as they need refactoring
-# Step 3: Denoising (UNet)
+# Step 3: Denoising (UNet) - Per-Frame Context Loading
 echo ""
-echo "==> Step 3/4: Denoising Latents (UNet - VRAM intensive)"
-echo "  NOTE: Step 3 needs updating to load per-frame context files"
-echo "  This is left for you to implement based on your needs"
-# python bin/step3_denoise.py \
-#     --context_dir "$CONTEXT_DIR" \
-#     --video_info_path "$VIDEO_INFO_FILE" \
-#     --output_path "$DENOISED_FILE" \
-#     --cache_dir "$CACHE_DIR" \
-#     --num_inference_steps "$NUM_INFERENCE_STEPS" \
-#     --guidance_scale "$GUIDANCE_SCALE" \
-#     --window_size "$WINDOW_SIZE" \
-#     --overlap "$OVERLAP" \
-#     --seed "$SEED" \
-#     --model_type "$MODEL_TYPE"
-
-if false; then  # Disabled for now
+echo "==> Step 3/4: Denoising Latents (UNet - VRAM intensive) - Per-Frame Mode"
+python bin/step3_denoise.py \
+    --context_dir "$CONTEXT_DIR" \
+    --video_info_path "$VIDEO_INFO_FILE" \
+    --output_path "$DENOISED_FILE" \
+    --cache_dir "$CACHE_DIR" \
+    --num_inference_steps "$NUM_INFERENCE_STEPS" \
+    --guidance_scale "$GUIDANCE_SCALE" \
+    --window_size "$WINDOW_SIZE" \
+    --overlap "$OVERLAP" \
+    --seed "$SEED" \
+    --model_type "$MODEL_TYPE"
 
 if [ $? -ne 0 ]; then
     echo "Error: Step 3 failed"
