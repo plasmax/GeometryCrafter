@@ -80,7 +80,7 @@ class UNetSpatioTemporalConditionModelVid2vid(
 
         down_block_res_samples = (sample,)
 
-        if self.training and self.gradient_checkpointing:
+        if self.gradient_checkpointing:
             def create_custom_forward(module):
                 def custom_forward(*inputs):
                     return module(*inputs)
