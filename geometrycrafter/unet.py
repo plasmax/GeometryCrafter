@@ -9,12 +9,6 @@ from diffusers.utils import is_torch_version
 class UNetSpatioTemporalConditionModelVid2vid(
     UNetSpatioTemporalConditionModel
 ):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._block_cpu_offload = False
-        self._main_device = None
-        self._offload_device = torch.device("cpu")
-
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
 
@@ -100,9 +94,9 @@ class UNetSpatioTemporalConditionModelVid2vid(
         encoder_hidden_states = encoder_hidden_states.flatten(0, 1).unsqueeze(1)
 
         # 2. pre-process
-        block_offload = self._block_cpu_offload
-        main_device = self._main_device if self._main_device is not None else sample.device
-        offload_device = self._offload_device if hasattr(self, "_offload_device") else torch.device("cpu")
+        block_offload = getattr(self, "_block_cpu_offload", False)
+        main_device = getattr(self, "_main_device", sample.device)
+        offload_device = getattr(self, "_offload_device", torch.device("cpu"))
 
         def _to_main(module):
             if block_offload:
