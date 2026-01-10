@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from geometrycrafter import PMapAutoencoderKLTemporalDecoder
 
+offline_root = "/mnt/scratch/mlast/GeometryCrafter/pretrained_models"
+
 
 def decode_point_map(
     point_map_vae,
@@ -159,7 +161,7 @@ def main():
     # Load PointMapVAE
     print(f"Loading PointMapVAE...")
     point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
-        'TencentARC/GeometryCrafter',
+        f'{offline_root}/TencentARC/GeometryCrafter',
         subfolder='point_map_vae',
         low_cpu_mem_usage=True,
         torch_dtype=torch.float32,

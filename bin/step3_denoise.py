@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from geometrycrafter import UNetSpatioTemporalConditionModelVid2vid
 
+offline_root = "/mnt/scratch/mlast/GeometryCrafter/pretrained_models"
+
 
 def prepare_latents(batch_size, num_frames, num_channels, height, width, dtype, device, generator, latents=None):
     """Prepare initial noise latents."""
@@ -211,7 +213,7 @@ def main():
     # Load UNet (the big model)
     print(f"\nLoading UNet ({args.model_type})...")
     unet = UNetSpatioTemporalConditionModelVid2vid.from_pretrained(
-        'TencentARC/GeometryCrafter',
+        f'{offline_root}/TencentARC/GeometryCrafter',
         subfolder=f'unet_{args.model_type}',
         low_cpu_mem_usage=True,
         torch_dtype=dtype,
@@ -223,7 +225,7 @@ def main():
     # Load scheduler
     print("Loading scheduler...")
     scheduler = EulerDiscreteScheduler.from_pretrained(
-        "stabilityai/stable-video-diffusion-img2vid-xt",
+        f"{offline_root}/stabilityai/stable-video-diffusion-img2vid-xt",
         subfolder="scheduler",
         cache_dir=args.cache_dir
     )
@@ -280,7 +282,7 @@ def main():
     # (We need this to properly scale latents, but we don't load the full VAE)
     from diffusers import AutoencoderKLTemporalDecoder
     vae_config = AutoencoderKLTemporalDecoder.load_config(
-        "stabilityai/stable-video-diffusion-img2vid-xt",
+        f"{offline_root}/stabilityai/stable-video-diffusion-img2vid-xt",
         subfolder="vae",
         cache_dir=args.cache_dir
     )
