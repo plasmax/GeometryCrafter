@@ -55,15 +55,18 @@ def encode_frame_vae(frame, vae):
     return latent.cpu()
 
 
-def encode_frame_prior(disparity, valid_mask, point_map, intrinsic_map, point_map_vae, vae, device):
+def encode_frame_prior(disparity, valid_mask, point_map_z, intrinsic_map_focal, point_map_vae, vae, device):
     """Encode geometry prior for a single frame using PointMapVAE."""
-    # All inputs: [H, W] or [C, H, W]
+    # disparity: [H, W]
+    # valid_mask: [H, W]
+    # point_map_z: [1, H, W] - only Z channel
+    # intrinsic_map_focal: [2, H, W] - only focal components
 
     # Create pseudo-image from disparity
     pseudo_image = disparity.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # [1, 3, H, W]
 
-    # Extract focal length magnitude from intrinsic map
-    intrinsic_scalar = torch.norm(intrinsic_map[2:4], p=2, dim=0, keepdim=False)  # [H, W]
+    # Extract focal length magnitude from intrinsic map (already subset to [2:4])
+    intrinsic_scalar = torch.norm(intrinsic_map_focal, p=2, dim=0, keepdim=False)  # [H, W]
 
     # First encode pseudo-image with VAE
     latent_dist = vae.encode(pseudo_image.to(device, dtype=vae.dtype)).latent_dist
@@ -71,7 +74,7 @@ def encode_frame_prior(disparity, valid_mask, point_map, intrinsic_map, point_ma
     # Then encode with PointMapVAE
     prior_input = torch.cat([
         intrinsic_scalar.unsqueeze(0).unsqueeze(0),  # [1, 1, H, W]
-        point_map[2:3].unsqueeze(0),                  # [1, 1, H, W]
+        point_map_z.unsqueeze(0),                     # [1, 1, H, W]
         disparity.unsqueeze(0).unsqueeze(0),          # [1, 1, H, W]
         valid_mask.unsqueeze(0).unsqueeze(0),         # [1, 1, H, W]
     ], dim=1).to(device)  # [1, 4, H, W]
@@ -234,14 +237,14 @@ def main():
         prior_path = priors_dir / f"frame_{i:05d}_prior.pt"
         prior_data = torch.load(prior_path)
 
-        pred_disparity = prior_data['disparity']      # [H, W]
-        pred_valid_mask = prior_data['valid_mask']    # [H, W]
-        pred_point_map = prior_data['point_map']      # [3, H, W]
-        pred_intrinsic_map = prior_data['intrinsic_map']  # [4, H, W]
+        pred_disparity = prior_data['disparity']              # [H, W]
+        pred_valid_mask = prior_data['valid_mask']            # [H, W]
+        pred_point_map_z = prior_data['point_map_z']          # [1, H, W]
+        pred_intrinsic_map_focal = prior_data['intrinsic_map_focal']  # [2, H, W]
 
         with torch.inference_mode():
             prior_latent = encode_frame_prior(
-                pred_disparity, pred_valid_mask, pred_point_map, pred_intrinsic_map,
+                pred_disparity, pred_valid_mask, pred_point_map_z, pred_intrinsic_map_focal,
                 point_map_vae, vae, device
             )
 

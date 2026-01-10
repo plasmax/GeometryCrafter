@@ -27,11 +27,13 @@ Steps 1 and 2 have been refactored to use **per-frame processing** to minimize V
 └── ... (one file per frame)
 ```
 
-Each `frame_XXXXX_prior.pt` contains:
+Each `frame_XXXXX_prior.pt` contains (optimized - only what's needed):
 - `disparity`: [H, W] - Normalized disparity map
 - `valid_mask`: [H, W] - Validity mask
-- `point_map`: [3, H, W] - 3D point map [x/z, y/z, log(z)]
-- `intrinsic_map`: [4, H, W] - Camera intrinsic parameters
+- `point_map_z`: [1, H, W] - Only Z channel (log depth) from point map
+- `intrinsic_map_focal`: [2, H, W] - Only focal components [2:4] from intrinsic map
+
+**Note**: Only saves the channels actually used by `encode_point_map` to minimize file size (3 channels instead of 7).
 
 ### Step 2 Output (Context Directory)
 ```
@@ -188,11 +190,11 @@ Needs to be updated to:
 Per-frame mode uses more disk space but less VRAM:
 
 **For 100 frames at 576x1024:**
-- Step 1 output: ~100 files × 1-2 MB = 100-200 MB
+- Step 1 output: ~100 files × 400-600 KB = 40-60 MB (optimized from 800 MB per frame!)
 - Step 2 output: ~300 files × 500 KB-1 MB = 150-300 MB
-- **Total**: ~250-500 MB (vs ~150-250 MB for single-file mode)
+- **Total**: ~190-360 MB
 
-Trade-off: ~2x disk space for ~50% less VRAM
+**Optimization**: By saving only the channels actually used (3 instead of 7), Step 1 files are ~60% smaller!
 
 ## Performance
 

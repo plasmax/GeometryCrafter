@@ -211,13 +211,14 @@ def main():
                 mode='bilinear', align_corners=False
             ).squeeze(0)
 
-        # Save this frame
+        # Save this frame - only save what's actually needed for encoding
+        # From encode_point_map: only uses intrinsic_map[2:4] and point_map[2:3]
         frame_path = output_dir / f"frame_{i:05d}_prior.pt"
         torch.save({
-            'disparity': pred_disp,      # [H, W]
-            'valid_mask': pred_mask,     # [H, W]
-            'point_map': pred_pmap,      # [3, H, W]
-            'intrinsic_map': pred_intr,  # [4, H, W]
+            'disparity': pred_disp,              # [H, W] - needed
+            'valid_mask': pred_mask,             # [H, W] - needed
+            'point_map_z': pred_pmap[2:3],       # [1, H, W] - only Z channel needed
+            'intrinsic_map_focal': pred_intr[2:4],  # [2, H, W] - only focal components needed
         }, frame_path)
 
         if (i + 1) % 10 == 0:
