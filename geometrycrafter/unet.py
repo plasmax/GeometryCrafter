@@ -325,9 +325,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
                 for i, upsample_block in enumerate(self.up_blocks):
                     # Load residuals from cache or get from tuple
                     if use_residual_cache:
-                        # Load from cache in reverse order
-                        cache_idx = len(self.up_blocks) - 1 - i
-                        res_samples = residual_cache.load(cache_idx, sample.device, sample.dtype)
+                        # Each down block may produce multiple residuals
+                        # We need to load the corresponding down block's residuals in reverse order
+                        down_block_idx = len(self.down_blocks) - 1 - i
+                        res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
                     else:
                         res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                         down_block_res_samples = down_block_res_samples[
@@ -413,8 +414,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
                 for i, upsample_block in enumerate(self.up_blocks):
                     # Load residuals from cache or get from tuple
                     if use_residual_cache:
-                        cache_idx = len(self.up_blocks) - 1 - i
-                        res_samples = residual_cache.load(cache_idx, sample.device, sample.dtype)
+                        # Each down block may produce multiple residuals
+                        # We need to load the corresponding down block's residuals in reverse order
+                        down_block_idx = len(self.down_blocks) - 1 - i
+                        res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
                     else:
                         res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                         down_block_res_samples = down_block_res_samples[
@@ -497,8 +500,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
             for i, upsample_block in enumerate(self.up_blocks):
                 # Load residuals from cache or get from tuple
                 if use_residual_cache:
-                    cache_idx = len(self.up_blocks) - 1 - i
-                    res_samples = residual_cache.load(cache_idx, sample.device, sample.dtype)
+                    # Each down block may produce multiple residuals
+                    # We need to load the corresponding down block's residuals in reverse order
+                    down_block_idx = len(self.down_blocks) - 1 - i
+                    res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
                 else:
                     res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                     down_block_res_samples = down_block_res_samples[
