@@ -260,11 +260,12 @@ class UNetSpatioTemporalConditionModelVid2vid(
         residual_cache = self._create_residual_cache()
         use_residual_cache = residual_cache is not None
 
-        # Track residual counts per down block for later retrieval
-        residual_counts: List[int] = []
+        # Initial residual - always keep the first sample in the tuple
+        # (it's small at this stage and needed for proper indexing)
+        down_block_res_samples = (sample,) if not use_residual_cache else None
 
-        # Initial residual - keep in memory (small at this stage)
-        down_block_res_samples = (sample,)
+        # For caching: store individual residuals, not per-block tuples
+        cached_residuals: List = [] if use_residual_cache else None
 
         if self.gradient_checkpointing:
             def create_custom_forward(module):
@@ -301,8 +302,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
 
                     # Save residuals to cache or keep in tuple
                     if use_residual_cache:
-                        residual_counts.append(len(res_samples))
-                        residual_cache.save(res_samples)
+                        # Store each residual individually for flat indexing
+                        for res in res_samples:
+                            residual_cache.save((res,))  # Save as single-element tuple
+                            cached_residuals.append(None)  # Placeholder for tracking count
                         del res_samples
                         if main_device.type == "cuda":
                             torch.cuda.empty_cache()
@@ -325,10 +328,16 @@ class UNetSpatioTemporalConditionModelVid2vid(
                 for i, upsample_block in enumerate(self.up_blocks):
                     # Load residuals from cache or get from tuple
                     if use_residual_cache:
-                        # Each down block may produce multiple residuals
-                        # We need to load the corresponding down block's residuals in reverse order
-                        down_block_idx = len(self.down_blocks) - 1 - i
-                        res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
+                        # Load the required number of residuals from the end of the cache
+                        num_residuals = len(upsample_block.resnets)
+                        res_samples = []
+                        for _ in range(num_residuals):
+                            # Load from cache in reverse order
+                            idx = len(cached_residuals) - 1
+                            cached_residuals.pop()
+                            res_tuple = residual_cache.load(idx, sample.device, sample.dtype)
+                            res_samples.insert(0, res_tuple[0])  # Extract single tensor from tuple
+                        res_samples = tuple(res_samples)
                     else:
                         res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                         down_block_res_samples = down_block_res_samples[
@@ -391,8 +400,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
 
                     # Save residuals to cache or keep in tuple
                     if use_residual_cache:
-                        residual_counts.append(len(res_samples))
-                        residual_cache.save(res_samples)
+                        # Store each residual individually for flat indexing
+                        for res in res_samples:
+                            residual_cache.save((res,))  # Save as single-element tuple
+                            cached_residuals.append(None)  # Placeholder for tracking count
                         del res_samples
                         if main_device.type == "cuda":
                             torch.cuda.empty_cache()
@@ -414,10 +425,16 @@ class UNetSpatioTemporalConditionModelVid2vid(
                 for i, upsample_block in enumerate(self.up_blocks):
                     # Load residuals from cache or get from tuple
                     if use_residual_cache:
-                        # Each down block may produce multiple residuals
-                        # We need to load the corresponding down block's residuals in reverse order
-                        down_block_idx = len(self.down_blocks) - 1 - i
-                        res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
+                        # Load the required number of residuals from the end of the cache
+                        num_residuals = len(upsample_block.resnets)
+                        res_samples = []
+                        for _ in range(num_residuals):
+                            # Load from cache in reverse order
+                            idx = len(cached_residuals) - 1
+                            cached_residuals.pop()
+                            res_tuple = residual_cache.load(idx, sample.device, sample.dtype)
+                            res_samples.insert(0, res_tuple[0])  # Extract single tensor from tuple
+                        res_samples = tuple(res_samples)
                     else:
                         res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                         down_block_res_samples = down_block_res_samples[
@@ -478,8 +495,10 @@ class UNetSpatioTemporalConditionModelVid2vid(
 
                 # Save residuals to cache or keep in tuple
                 if use_residual_cache:
-                    residual_counts.append(len(res_samples))
-                    residual_cache.save(res_samples)
+                    # Store each residual individually for flat indexing
+                    for res in res_samples:
+                        residual_cache.save((res,))  # Save as single-element tuple
+                        cached_residuals.append(None)  # Placeholder for tracking count
                     del res_samples
                     if main_device.type == "cuda":
                         torch.cuda.empty_cache()
@@ -500,10 +519,16 @@ class UNetSpatioTemporalConditionModelVid2vid(
             for i, upsample_block in enumerate(self.up_blocks):
                 # Load residuals from cache or get from tuple
                 if use_residual_cache:
-                    # Each down block may produce multiple residuals
-                    # We need to load the corresponding down block's residuals in reverse order
-                    down_block_idx = len(self.down_blocks) - 1 - i
-                    res_samples = residual_cache.load(down_block_idx, sample.device, sample.dtype)
+                    # Load the required number of residuals from the end of the cache
+                    num_residuals = len(upsample_block.resnets)
+                    res_samples = []
+                    for _ in range(num_residuals):
+                        # Load from cache in reverse order
+                        idx = len(cached_residuals) - 1
+                        cached_residuals.pop()
+                        res_tuple = residual_cache.load(idx, sample.device, sample.dtype)
+                        res_samples.insert(0, res_tuple[0])  # Extract single tensor from tuple
+                    res_samples = tuple(res_samples)
                 else:
                     res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
                     down_block_res_samples = down_block_res_samples[
