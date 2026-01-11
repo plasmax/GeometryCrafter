@@ -372,7 +372,7 @@ def main():
 
     # Prepare initial latents
     print("\nPreparing initial noise latents...")
-    num_channels_latents = 8
+    num_channels_latents = 4  # UNet outputs 4 channels; prior latents add another 4 for input
     generator = torch.Generator(device=device).manual_seed(args.seed)
     latents_init = prepare_latents(
         batch_size=1,
