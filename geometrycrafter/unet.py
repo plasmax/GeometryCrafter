@@ -260,12 +260,16 @@ class UNetSpatioTemporalConditionModelVid2vid(
         residual_cache = self._create_residual_cache()
         use_residual_cache = residual_cache is not None
 
-        # Initial residual - always keep the first sample in the tuple
-        # (it's small at this stage and needed for proper indexing)
-        down_block_res_samples = (sample,) if not use_residual_cache else None
-
         # For caching: store individual residuals, not per-block tuples
         cached_residuals: List = [] if use_residual_cache else None
+
+        # Initial residual - cache it or keep in tuple
+        if use_residual_cache:
+            residual_cache.save((sample,))
+            cached_residuals.append(None)
+            down_block_res_samples = None
+        else:
+            down_block_res_samples = (sample,)
 
         if self.gradient_checkpointing:
             def create_custom_forward(module):
