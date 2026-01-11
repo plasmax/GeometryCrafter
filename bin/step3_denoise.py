@@ -95,7 +95,7 @@ def denoise_latents(
         # Load context for this window only (on-demand) - stays on CPU
         print(f"  Loading context for frames {idx_start}-{idx_end-1}...")
         frame_indices = list(range(idx_start, idx_end))
-        video_embeddings_cpu, prior_latents_cpu = load_context_frames(
+        video_embeddings_cpu, video_latents_cpu, prior_latents_cpu = load_context_frames(
             context_dir, frame_indices, device, dtype
         )
 
@@ -111,12 +111,13 @@ def denoise_latents(
 
                 # Transfer context to GPU only for this timestep
                 video_embeddings_current = video_embeddings_cpu.to(device)
+                video_latents_current = video_latents_cpu.to(device)
                 prior_latents_current = prior_latents_cpu.to(device)
 
                 # Prepare model input
                 latent_model_input = scheduler.scale_model_input(latents, t)
                 latent_model_input = torch.cat(
-                    [latent_model_input, prior_latents_current], dim=2
+                    [latent_model_input, video_latents_current, prior_latents_current], dim=2
                 )
 
                 # Predict noise
@@ -133,6 +134,7 @@ def denoise_latents(
                     latent_model_input_uncond = scheduler.scale_model_input(latents, t)
                     latent_model_input_uncond = torch.cat(
                         [latent_model_input_uncond,
+                         torch.zeros_like(video_latents_current),
                          torch.zeros_like(prior_latents_current)],
                         dim=2,
                     )
@@ -149,7 +151,7 @@ def denoise_latents(
                 latents = scheduler.step(noise_pred, t, latents).prev_sample
 
                 # Free GPU memory for context (will reload next timestep)
-                del video_embeddings_current, prior_latents_current
+                del video_embeddings_current, video_latents_current, prior_latents_current
                 torch.cuda.empty_cache()
 
                 pbar.update(1)
@@ -177,12 +179,19 @@ def load_context_frames(context_dir, frame_indices, device, dtype):
     to GPU only when needed during denoising loop.
     """
     embeddings = []
+    vae_latents = []
     prior_latents = []
 
     for idx in frame_indices:
         # Load embeddings - shape [1, 1024] from step2
         embed = torch.load(context_dir / f"frame_{idx:05d}_embed.pt")
         embeddings.append(embed.squeeze(0).to('cpu', dtype=dtype))  # Keep on CPU
+
+        # Load VAE latents - may be [1, C, H, W] or [C, H, W]
+        vae_lat = torch.load(context_dir / f"frame_{idx:05d}_vae_latent.pt")
+        if vae_lat.dim() == 4:  # [1, C, H, W]
+            vae_lat = vae_lat.squeeze(0)  # Remove batch dim -> [C, H, W]
+        vae_latents.append(vae_lat.to('cpu', dtype=dtype))  # Keep on CPU
 
         # Load prior latents - may be [1, C, H, W] or [C, H, W]
         prior_lat = torch.load(context_dir / f"frame_{idx:05d}_prior_latent.pt")
@@ -192,9 +201,10 @@ def load_context_frames(context_dir, frame_indices, device, dtype):
 
     # Stack and add batch dimension - keep on CPU
     video_embeddings = torch.stack(embeddings, dim=0).unsqueeze(0)  # [1, T, 1024]
+    video_latents = torch.stack(vae_latents, dim=0).unsqueeze(0)     # [1, T, C, H, W]
     prior_latents = torch.stack(prior_latents, dim=0).unsqueeze(0)   # [1, T, C, H, W]
 
-    return video_embeddings, prior_latents
+    return video_embeddings, video_latents, prior_latents
 
 
 def main():
