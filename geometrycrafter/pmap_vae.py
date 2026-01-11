@@ -30,10 +30,10 @@ class PMapTemporalDecoder(nn.Module):
         super().__init__()
 
         self.conv_in = nn.Conv2d(
-            in_channels, 
-            block_out_channels[-1], 
-            kernel_size=3, 
-            stride=1, 
+            in_channels,
+            block_out_channels[-1],
+            kernel_size=3,
+            stride=1,
             padding=1
         )
         self.mid_block = MidBlockTemporalDecoder(
@@ -68,9 +68,9 @@ class PMapTemporalDecoder(nn.Module):
                     nn.GroupNorm(num_channels=block_out_channels[0], num_groups=32, eps=1e-6),
                     nn.ReLU(inplace=True),
                     nn.Conv2d(
-                        block_out_channels[0], 
-                        block_out_channels[0] // 2, 
-                        kernel_size=3, 
+                        block_out_channels[0],
+                        block_out_channels[0] // 2,
+                        kernel_size=3,
                         padding=1
                     ),
                     SpatioTemporalResBlock(
@@ -85,8 +85,8 @@ class PMapTemporalDecoder(nn.Module):
                     ),
                     nn.ReLU(inplace=True),
                     nn.Conv2d(
-                        block_out_channels[0] // 2, 
-                        out_channel, 
+                        block_out_channels[0] // 2,
+                        out_channel,
                         kernel_size=1,
                     )
                 ])
@@ -102,6 +102,7 @@ class PMapTemporalDecoder(nn.Module):
             ))
 
         self.gradient_checkpointing = False
+        self.enable_block_offloading = False  # CPU offloading for blocks
 
     def forward(
         self,
@@ -109,11 +110,13 @@ class PMapTemporalDecoder(nn.Module):
         image_only_indicator: torch.Tensor,
         num_frames: int = 1,
     ):
+        original_device = sample.device
         sample = self.conv_in(sample)
 
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
 
-        if self.training and self.gradient_checkpointing:
+        # Use gradient checkpointing even in inference mode if enabled
+        if self.gradient_checkpointing:
             def create_custom_forward(module):
                 def custom_forward(*inputs):
                     return module(*inputs)
@@ -122,6 +125,9 @@ class PMapTemporalDecoder(nn.Module):
 
             if is_torch_version(">=", "1.11.0"):
                 # middle
+                if self.enable_block_offloading:
+                    self.mid_block.to(original_device)
+
                 sample = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(self.mid_block),
                     sample,
@@ -130,16 +136,30 @@ class PMapTemporalDecoder(nn.Module):
                 )
                 sample = sample.to(upscale_dtype)
 
+                if self.enable_block_offloading:
+                    self.mid_block.to('cpu')
+                    torch.cuda.empty_cache()
+
                 # up
-                for up_block in self.up_blocks:
+                for i, up_block in enumerate(self.up_blocks):
+                    if self.enable_block_offloading:
+                        up_block.to(original_device)
+
                     sample = torch.utils.checkpoint.checkpoint(
                         create_custom_forward(up_block),
                         sample,
                         image_only_indicator,
                         use_reentrant=False,
                     )
+
+                    if self.enable_block_offloading:
+                        up_block.to('cpu')
+                        torch.cuda.empty_cache()
             else:
                 # middle
+                if self.enable_block_offloading:
+                    self.mid_block.to(original_device)
+
                 sample = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(self.mid_block),
                     sample,
@@ -147,21 +167,46 @@ class PMapTemporalDecoder(nn.Module):
                 )
                 sample = sample.to(upscale_dtype)
 
+                if self.enable_block_offloading:
+                    self.mid_block.to('cpu')
+                    torch.cuda.empty_cache()
+
                 # up
-                for up_block in self.up_blocks:
+                for i, up_block in enumerate(self.up_blocks):
+                    if self.enable_block_offloading:
+                        up_block.to(original_device)
+
                     sample = torch.utils.checkpoint.checkpoint(
                         create_custom_forward(up_block),
                         sample,
                         image_only_indicator,
                     )
+
+                    if self.enable_block_offloading:
+                        up_block.to('cpu')
+                        torch.cuda.empty_cache()
         else:
             # middle
+            if self.enable_block_offloading:
+                self.mid_block.to(original_device)
+
             sample = self.mid_block(sample, image_only_indicator=image_only_indicator)
             sample = sample.to(upscale_dtype)
 
+            if self.enable_block_offloading:
+                self.mid_block.to('cpu')
+                torch.cuda.empty_cache()
+
             # up
-            for up_block in self.up_blocks:
+            for i, up_block in enumerate(self.up_blocks):
+                if self.enable_block_offloading:
+                    up_block.to(original_device)
+
                 sample = up_block(sample, image_only_indicator=image_only_indicator)
+
+                if self.enable_block_offloading:
+                    up_block.to('cpu')
+                    torch.cuda.empty_cache()
 
         # post-process
 
@@ -231,6 +276,14 @@ class PMapAutoencoderKLTemporalDecoder(ModelMixin, ConfigMixin):
     def _set_gradient_checkpointing(self, module, value=False):
         if isinstance(module, (Encoder, PMapTemporalDecoder)):
             module.gradient_checkpointing = value
+
+    def enable_vae_offloading(self):
+        """Enable CPU offloading for decoder blocks to save VRAM."""
+        self.decoder.enable_block_offloading = True
+
+    def enable_inference_checkpointing(self):
+        """Enable gradient checkpointing even in inference mode to reduce activations."""
+        self.decoder.gradient_checkpointing = True
 
     @property
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors

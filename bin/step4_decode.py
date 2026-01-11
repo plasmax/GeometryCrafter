@@ -40,9 +40,20 @@ def decode_point_map(
     rec_valid_masks = []
 
     print(f"Decoding {T} frames in chunks of {chunk_size}...")
+
+    # Print initial VRAM usage
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated(device) / 1024**3
+        reserved = torch.cuda.memory_reserved(device) / 1024**3
+        print(f"  Initial VRAM: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+
     for i in range(0, T, chunk_size):
         end_idx = min(i + chunk_size, T)
         lat = latents[i:end_idx].to(device)
+
+        # Clear cache before decoding
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         rec_imap, rec_dmap, rec_vmask = point_map_vae.decode(
             lat,
@@ -53,7 +64,13 @@ def decode_point_map(
         rec_depth_maps.append(rec_dmap.cpu())
         rec_valid_masks.append(rec_vmask.cpu())
 
-        print(f"  Decoded frames {i+1}-{end_idx}/{T}")
+        # Print VRAM usage after each chunk
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated(device) / 1024**3
+            peak = torch.cuda.max_memory_allocated(device) / 1024**3
+            print(f"  Decoded frames {i+1}-{end_idx}/{T} | VRAM: {allocated:.2f} GB (peak: {peak:.2f} GB)")
+        else:
+            print(f"  Decoded frames {i+1}-{end_idx}/{T}")
 
     rec_intrinsic_maps = torch.cat(rec_intrinsic_maps, dim=0)
     rec_depth_maps = torch.cat(rec_depth_maps, dim=0)
@@ -130,6 +147,8 @@ def main():
     parser.add_argument('--force_projection', type=str, default='true', help='Force projection')
     parser.add_argument('--force_fixed_focal', type=str, default='true', help='Force fixed focal length')
     parser.add_argument('--use_extract_interp', type=str, default='false', help='Use exact interpolation')
+    parser.add_argument('--enable_vae_offloading', type=str, default='true', help='Enable CPU offloading for VAE blocks')
+    parser.add_argument('--enable_inference_checkpointing', type=str, default='true', help='Enable gradient checkpointing in inference')
 
     args = parser.parse_args()
 
@@ -137,6 +156,8 @@ def main():
     force_projection = args.force_projection.lower() == 'true'
     force_fixed_focal = args.force_fixed_focal.lower() == 'true'
     use_extract_interp = args.use_extract_interp.lower() == 'true'
+    enable_vae_offloading = args.enable_vae_offloading.lower() == 'true'
+    enable_inference_checkpointing = args.enable_inference_checkpointing.lower() == 'true'
 
     print("="*60)
     print("Step 4: Decoding to Geometry Maps")
@@ -169,6 +190,15 @@ def main():
     ).to(device)
     point_map_vae.requires_grad_(False)
     print("  PointMapVAE loaded.")
+
+    # Enable VRAM optimizations
+    if enable_vae_offloading:
+        print("  Enabling VAE block offloading...")
+        point_map_vae.enable_vae_offloading()
+
+    if enable_inference_checkpointing:
+        print("  Enabling inference gradient checkpointing...")
+        point_map_vae.enable_inference_checkpointing()
 
     # Decode
     print("\nDecoding latents to point maps...")
