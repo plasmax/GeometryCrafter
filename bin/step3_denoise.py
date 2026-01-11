@@ -103,7 +103,7 @@ def denoise_latents(
         with tqdm(total=num_inference_steps, desc=f"Window {idx_start//stride + 1}") as pbar:
             for i, t in enumerate(timesteps):
                 # Blend overlapping region on first timestep
-                if latents_all is not None and i == 0:
+                if latents_all is not None and i == 0 and overlap > 0:
                     latents[:, :overlap] = (
                         latents_all[:, -overlap:]
                         + latents[:, :overlap] / scheduler.init_noise_sigma * scheduler.sigmas[i]
@@ -165,7 +165,10 @@ def denoise_latents(
                 latents_all[:, -overlap:] = (
                     latents[:, :overlap] * weights + latents_all[:, -overlap:] * (1 - weights)
                 )
-            latents_all = torch.cat([latents_all, latents[:, overlap:]], dim=1)
+                latents_all = torch.cat([latents_all, latents[:, overlap:]], dim=1)
+            else:
+                # No overlap - just concatenate
+                latents_all = torch.cat([latents_all, latents], dim=1)
 
         idx_start += stride
 
