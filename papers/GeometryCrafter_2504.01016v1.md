@@ -7,7 +7,7 @@
 
 ---
 
-![Figure 1](https://replicate.delivery/xpbkg/H8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 1](images/figure_1.png)
 **Figure 1. We present GeometryCrafter, a novel approach that estimates temporally consistent, high-quality point maps from open-world videos, facilitating downstream applications such as 3D/4D reconstruction and depth-based video editing or generation.**
 
 ---
@@ -33,7 +33,7 @@ We comprehensively evaluate GeometryCrafter on diverse datasets, ranging from st
 
 ---
 
-![Figure 2](https://replicate.delivery/xpbkg/p6fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 2](images/figure_2.png)
 **Figure 2. Diffusion-based depth estimation methods, e.g., DepthCrafter and DAV, suffer from significant metric errors in distant regions due to the compression of unbounded depth values into the bounded input range of VAEs.**
 
 ---
@@ -50,7 +50,7 @@ We comprehensively evaluate GeometryCrafter on diverse datasets, ranging from st
 ### 3. Method
 Given an input RGB video $\mathbf{v} \in \mathbb{R}^{T \times H \times W \times 3}$, we aim to predict a temporally consistent point map sequence $\mathbf{p} \in \mathbb{R}^{T \times H \times W \times 3}$ alongside a valid mask $\mathbf{m} \in [0, 1]^{T \times H \times W}$ to exclude undefined regions (e.g., sky). Each point map contains the 3D coordinates $\mathbf{p} = (x_p, y_p, z_p)^T$ in the camera coordinate system for every pixel. To this end, we propose GeometryCrafter, a novel approach that leverages video diffusion models (VDMs) for robust point map estimation from open-world videos. We model the joint distribution $\mathcal{P}(\mathbf{p}, \mathbf{m} | \mathbf{v})$ in the latent space. While VDMs' native VAE effectively encodes video frames and masks, accurate point map representation necessitates a dedicated VAE tailored for geometric encoding and decoding.
 
-![Figure 3](https://replicate.delivery/xpbkg/B8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 3](images/figure_3.png)
 **Figure 3. Architecture of our point map VAE.** The point map VAE encodes and decodes point maps with unbounded values, alleviating the inaccurate prediction in distant regions. We adopt a dual-encoder design: the native encoder $\mathcal{E}_{SVD}$ inherited from SVD captures normalized disparity maps, while a residual encoder $\mathcal{E}_\epsilon$ embeds remaining information as an offset. It preserves the original latent space by regulating the latents via the original decoder $\mathcal{D}_{SVD}$, enabling the utilization of pretrained diffusion priors. A point map decoder $\mathcal{D}_{pmap}$ recovers the final point maps from the latent codes.
 
 #### 3.1. Architecture of Point Map VAE
@@ -82,7 +82,7 @@ $$ \mathbf{p}_{dec} = [\theta_{diag}, \log z_p], \quad (5) $$
 
 where $\theta_{diag} = \sqrt{W^2 + H^2} / 2f$ denotes the diagonal field of view, a constant map for all points in a frame. Since $\mathbf{p}_{dec}$ is independent of spatial location, it is more suitable for our VAE to learn an effective latent distribution. Moreover, this formulation enables us to train our network only on fixed-resolution videos, while generalizing to varying resolutions and aspect ratios, owing to the invariance of $\theta_{diag}$. The original point map $\mathbf{p}$ can be effortlessly recovered from $\mathbf{p}_{dec}$ via the inverse perspective transformation.
 
-![Figure 4](https://replicate.delivery/xpbkg/Q8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 4](images/figure_4.png)
 **Figure 4. Diffusion UNet.** We jointly condition the diffusion model on video latents and per-frame geometry priors from an image MGE model $\mathcal{M}_{img}$. The geometry is encoded into latent space via our point map VAE, while the video latents are obtained from the native VAE.
 
 **Loss functions.** To train the point map VAE, we define reconstruction loss $\mathcal{L}_{recon}$ as the $L_1$ norm between the decoded depth and diagonal field of view and their ground truth counterparts. Besides, we also impose a mask loss $\mathcal{L}_{mask}$ to exclude undefined regions, e.g. sky, as the $L_2$ norm between the predicted and ground truth valid masks. To promote surface quality, we introduce a normal loss $\mathcal{L}_n$ that supervises the normal maps derived from the reconstructed point maps and the ground truth, as well as a multi-scale depth loss $\mathcal{L}_{ms}$ that measures the alignment between reconstructed and ground truth depth maps within local regions, inspired by MoGe. Importantly, to regularize our latent space agnostic to the original SVD’s latent distribution, we employ a loss term $\mathcal{L}_{identity}$ to penalize the latent deviation:
@@ -138,7 +138,7 @@ We build GeometryCrafter upon the SVD framework. The residual encoder and point 
 
 **Evaluation on point maps.** We compare our method with representative point map estimation approaches, e.g., DUSt3R, MonST3R, UniDepth, DepthPro, and MoGe. Among them, DUSt3R and MonST3R are designed for two-view scenarios, addressing static and dynamic scenes, respectively, and are evaluated by inputting two identical frames. For MonST3R, we also evaluate with its post-processing, which requires external optical flows to refine global point clouds and poses. As shown in Tab. 1, our method outperforms others on most benchmarks, with substantial gains on the challenging Monkaa and Sintel datasets. Although UniDepth shows better performance on KITTI (likely due to training on DrivingStereo with a shared LiDAR sensor), our approach attains a superior average rank. For the image benchmark DIODE, our method still achieves competitive performance compared to methods specialized for static images. Notably, some methods are trained on ScanNet or ScanNet++, violating the zero-shot evaluation, yet our method sustains comparable accuracy on ScanNet. Moreover, visual comparisons in Fig. 5 indicate that only our method can produce temporally consistent point maps with fine-grained details, while others (UniDepth and MoGe) exhibit issues like flickering or blurred details.
 
-![Figure 5](https://replicate.delivery/xpbkg/H8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 5](images/figure_5.png)
 **Figure 5. Qualitative comparison of point map estimation.** Disparity maps are derived from estimated point maps via Eq. (1). The green boxes highlight temporal profiles of the disparity maps, sliced along the time axis at the green lines. Zoom in for better visualization.
 
 **Evaluation on depth maps.** To compare our method with cutting-edge monocular depth estimation methods, e.g., ChronoDepth, DepthCrafter, DAV, and DepthAnything (DA) V1 and V2, we follow the evaluation protocol in [31], except for a center crop to meet the aspect ratio requirement (0.5 to 2). As shown in Tab. 2, our method achieves the best performance on almost all video datasets and remains competitive even on the image dataset DIODE. The qualitative comparison in Fig. 6 demonstrates that our method generates superior depth maps and point clouds, e.g., the potato chip bucket and the plant in the first two examples. In driving scenarios, such as the third example, DepthCrafter and DAV predict infinity values for distant buildings, resulting in missing structures, whereas our method consistently produces regular structures and plausible depth values, even when the ground truth exceeds the LiDAR sensor’s range.
@@ -163,10 +163,10 @@ We build GeometryCrafter upon the SVD framework. The residual encoder and point 
 
 **Components in point map VAE.** We perform ablation studies to examine the effectiveness of the point map representation, multi-scale loss $\mathcal{L}_{ms}$, temporal layers in the decoder, and latent alignment. As shown in Tab. 4, the decoupled point map representation Eq. (5) markedly enhances reconstruction fidelity. Results in the second to fourth rows also highlight the importance of multi-scale supervision in the spatial domain and contextual information in the temporal domain. Eliminating the latent alignment component not only increases point map errors (see the last two rows of Tab. 4), but also hinders effectively leveraging video diffusion priors. As shown in Tab. 5 and Fig. 8, latent alignment substantially improves the quality and robustness of point map predictions.
 
-![Figure 6](https://replicate.delivery/xpbkg/D6fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 6](images/figure_6.png)
 **Figure 6. Qualitative comparison of depth map estimation.** We transform point maps and disparity maps into metric depth maps for better visualization of distant regions. Zoom in for better visualization.
 
-![Figure 7](https://replicate.delivery/xpbkg/K8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 7](images/figure_7.png)
 **Figure 7. Comparison on disparity (top) and depth (bottom) quality between our full model and the w/o point map VAE variant.**
 
 **Table 3. Ablation study on the effectiveness of point map VAE.**
@@ -207,7 +207,7 @@ We build GeometryCrafter upon the SVD framework. The residual encoder and point 
 
 **UNet design.** We investigate the impact and robustness of per-frame geometry priors derived from MoGe by excluding them from the UNet input and replacing MoGe with DUSt3R. As shown in Tab. 5, per-frame priors benefit the model across diverse scenarios by compensating for limited camera intrinsics in the training data. Moreover, replacing MoGe with DUSt3R also consistently improves performance, confirming the robustness of our method to different priors. Besides, we present two variants of the UNet: one with the diffusion framework (noted as Ours(G)) and the other with a deterministic scheme (noted as Ours(D)). As shown in Tab. 1 and Tab. 2, the deterministic approach exhibits slightly lower accuracy but achieves a 1.1× acceleration in inference speed, e.g. 4.1 v.s. 3.7 FPS at a $448 \times 768$ resolution on our experimental setup. Users may choose one of the two variants based on their requirements for speed or accuracy.
 
-![Figure 8](https://replicate.delivery/xpbkg/A8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 8](images/figure_8_9.png)
 **Figure 8. Effectiveness of latent alignment.**
 
 #### 4.4. Applications
@@ -215,7 +215,7 @@ We build GeometryCrafter upon the SVD framework. The residual encoder and point 
 
 **Depth-conditioned video generation.** Depth sequences are pivotal to controllable video generation, capturing the inherent 3D structures of videos. Our consistent depth maps serve directly as conditioning inputs in existing depth-driven methods (e.g., Control-A-Video), enabling creative outputs as shown in Fig. 9.
 
-![Figure 9](https://replicate.delivery/xpbkg/R8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Figure 9](images/figure_8_9.png)
 **Figure 9. Application of depth-conditioned video generation. The prompt is “a car is drifting on roads, snowy day, artstation”.**
 
 ---
@@ -229,7 +229,101 @@ Tian-Xing Xu completed this work during his internship at Tencent ARC Lab. The p
 ---
 
 ### References
-(Note: References [1]-[95] are listed in the original document across pages 9-12.)
+- [1] Shubhra Aich, Jean Marie Uwabeza Vianney, Md Amirul Islam, and Mannat Kaur Bingbing Liu. Bidirectional attention network for monocular depth estimation. In ICRA, 2021.
+- [2] Shumeet Baluja. Hiding images in plain sight: Deep steganography. Advances in neural information processing systems, 30, 2017.
+- [3] Shariq Farooq Bhat, Ibraheem Alhashim, and Peter Wonka. Adabins: Depth estimation using adaptive bins. In CVPR, 2021.
+- [4] Andreas Blattmann et al. Stable video diffusion: Scaling latent video diffusion models to large datasets. arXiv:2311.15127, 2023.
+- [5] Aleksei Bochkovskii et al. Depth pro: Sharp monocular metric depth in less than a second. arXiv:2410.02073, 2024.
+- [6] Tim Brooks et al. Video generation models as world simulators, 2024.
+- [7] D. J. Butler, J. Wulff, G. B. Stanley, and M. J. Black. A naturalistic open source movie for optical flow evaluation. In ECCV, 2012.
+- [8] Yohann Cabon, Naila Murray, and Martin Humenberger. Virtual kitti 2. arXiv:2001.10773, 2020.
+- [9] Weifeng Chen et al. Control-a-video: Controllable text-to-video generation with diffusion models, 2023.
+- [10] Yuhua Chen, Cordelia Schmid, and Cristian Sminchisescu. Self-supervised learning with geometric constraints in monocular video: Connecting flow, depth, and camera. In ICCV, 2019.
+- [11] Ho Kei Cheng and Alexander G Schwing. Xmem: Long-term video object segmentation with an atkinson-shiffrin memory model. In ECCV, 2022.
+- [12] Angela Dai et al. Scannet: Richly-annotated 3d reconstructions of indoor scenes. In CVPR, 2017.
+- [13] Daniel DeTone, Tomasz Malisiewicz, and Andrew Rabinovich. Superpoint: Self-supervised interest point detection and description. In CVPR Workshops, 2018.
+- [14] Xingshuai Dong et al. Towards real-time monocular depth estimation for robotics: A survey. IEEE TITS, 2022.
+- [15] David Eigen, Christian Puhrsch, and Rob Fergus. Depth map prediction from a single image using a multi-scale deep network. NeurIPS, 2014.
+- [16] Michael Fonder and Marc Van Droogenbroeck. Mid-air: A multi-modal dataset for extremely low altitude drone flights. In CVPR Workshops, 2019.
+- [17] Huan Fu, Mingming Gong, Chaohui Wang, Kayhan Batmanghelich, and Dacheng Tao. Deep ordinal regression network for monocular depth estimation. In CVPR, 2018.
+- [18] Xiao Fu et al. Geowizard: Unleashing the diffusion priors for 3d geometry estimation from a single image. In ECCV, 2024.
+- [19] Gonzalo Martin Garcia et al. Fine-tuning image-conditional diffusion models is easier than you think. arXiv:2409.11355, 2024.
+- [20] Andreas Geiger, Philip Lenz, Christoph Stiller, and Raquel Urtasun. Vision meets robotics: The kitti dataset. IJRR, 2013.
+- [21] Georgios Georgakis et al. Multiview rgb-d dataset for object instance detection. In 3DV, 2016.
+- [22] Jose L Gómez et al. Urbansyn dataset, the third musketeer of synthetic driving scenes. arXiv:2312.12176, 2023.
+- [23] Ming Gui et al. Depthfm: Fast monocular depth estimation with flow matching. arXiv:2403.13788, 2024.
+- [24] Vitor Guizilini et al. 3d packing for self-supervised monocular depth estimation. In CVPR, 2020.
+- [25] Jing He et al. Lotus: Diffusion-based visual foundation model for high-quality dense prediction. arXiv:2409.18124, 2024.
+- [26] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. NeurIPS, 2020.
+- [27] Fa-Ting Hong et al. Depth-aware generative adversarial network for talking head video generation. In CVPR, 2022.
+- [28] Mu Hu et al. Metric3d v2: A versatile monocular geometric foundation model for zero-shot metric depth and surface normal estimation. IEEE TPAMI, 2024.
+- [29] Wenbo Hu, Menghan Xia, Chi-Wing Fu, and Tien-Tsin Wong. Mononizing binocular videos. ACM TOG, 2020.
+- [30] Wenbo Hu et al. Tri-miprf: Tri-mip representation for efficient anti-aliasing neural radiance fields. In ICCV, 2023.
+- [31] Wenbo Hu et al. Depthcrafter: Generating consistent long depth sequences for open-world videos. In CVPR, 2025.
+- [32] Po-Han Huang et al. Deepmvs: Learning multi-view stereopsis. In CVPR, 2018.
+- [33] Junpeng Jing et al. Hinet: Deep image hiding by invertible network. In ICCV, 2021.
+- [34] Nikita Karaev et al. Dynamicstereo: Consistent dynamic depth from stereo videos. In CVPR, 2023.
+- [35] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of diffusion-based generative models. NeurIPS, 2022.
+- [36] Bingxin Ke et al. Repurposing diffusion-based image generators for monocular depth estimation. In CVPR, 2024.
+- [37] D. P. Kingma. Auto-encoding variational bayes. arXiv:1312.6114, 2013.
+- [38] Alexander Kirillov et al. Segment anything. In ICCV, 2023.
+- [39] Johannes Kopf, Xuejian Rong, and Jia-Bin Huang. Robust consistent video depth estimation. In CVPR, 2021.
+- [40] Jin Han Lee et al. From big to small: Multi-scale local planar guidance for monocular depth estimation. arXiv:1907.10326, 2019.
+- [41] Jiahui Lei et al. Mosca: Dynamic gaussian fusion from casual videos via 4d motion scaffolds. arXiv:2405.17421, 2024.
+- [42] Yixuan Li et al. Matrixcity: A large-scale city dataset for city-scale neural rendering and beyond. In ICCV, 2023.
+- [43] Zhenyu Li et al. Depthformer: Exploiting long-range correlation and local information for accurate monocular depth estimation. Machine Intelligence Research, 2023.
+- [44] Zhenyu Li, Xuyang Wang, Xianming Liu, and Junjun Jiang. Binsformer: Revisiting adaptive bins for monocular depth estimation. IEEE TIP, 2024.
+- [45] Lu Ling et al. Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision. In CVPR, 2024.
+- [46] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv:1711.05101, 2017.
+- [47] Xuan Luo, Jia-Bin Huang, Richard Szeliski, Kevin Matzen, and Johannes Kopf. Consistent video depth estimation. ACM TOG (SIGGRAPH), 2020.
+- [48] Nikolaus Mayer et al. A large dataset to train convolutional networks for disparity, optical flow, and scene flow estimation. In CVPR, 2016.
+- [49] Lukas Mehl et al. Spring: A high-resolution high-detail dataset and benchmark for scene flow, optical flow and stereo. In CVPR, 2023.
+- [50] Simon Niklaus et al. 3d ken burns effect from a single image. ACM TOG, 2019.
+- [51] Maxime Oquab et al. Dinov2: Learning robust visual features without supervision. In TMLR, 2024.
+- [52] Dennis Park et al. Is pseudo-lidar needed for monocular 3d object detection? In ICCV, 2021.
+- [53] Vaishakh Patil et al. P3depth: Monocular depth estimation with a piecewise planarity prior. In CVPR, 2022.
+- [54] F. Perazzi, J. Pont-Tuset, B. McWilliams, L. Van Gool, M. Gross, and A. Sorkine-Hornung. A benchmark dataset and evaluation methodology for video object segmentation. In CVPR, 2016.
+- [55] Duc-Hai Pham et al. Sharpdepth: Sharpening metric depth predictions using diffusion distillation. arXiv:2411.18229, 2024.
+- [56] Luigi Piccinelli et al. Unidepth: Universal monocular metric depth estimation. In CVPR, 2024.
+- [57] René Ranftl et al. Towards robust monocular depth estimation: Mixing datasets for zero-shot cross-dataset transfer. IEEE TPAMI, 2020.
+- [58] Mike Roberts et al. Hypersim: A photorealistic synthetic dataset for holistic indoor scene understanding. In ICCV, 2021.
+- [59] Robin Rombach et al. High-resolution image synthesis with latent diffusion models. In CVPR, 2022.
+- [60] German Ros et al. The synthia dataset: A large collection of synthetic images for semantic segmentation of urban scenes. In CVPR, 2016.
+- [61] Johannes L Schonberger and Jan-Michael Frahm. Structure-from-motion revisited. In CVPR, 2016.
+- [62] Jiahao Shao et al. Learning temporally consistent video depth from video diffusion priors. arXiv:2406.01493, 2024.
+- [63] Jascha Sohl-Dickstein et al. Deep unsupervised learning using nonequilibrium thermodynamics. In ICML, 2015.
+- [64] Wenqiang Sun et al. Dimensionx: Create any 3d and 4d scenes from a single image with controllable video diffusion. arXiv:2411.04928, 2024.
+- [65] Igor Vasiljevic et al. DIODE: A Dense Indoor and Outdoor DEpth Dataset. CoRR, 2019.
+- [66] Kaixuan Wang and Shaojie Shen. Flow-motion and depth network for monocular stereo and beyond. IEEE RAL, 2020.
+- [67] Qiang Wang, Shizhen Zheng, Qingsong Yan, Fei Deng, Kaiyong Zhao, and Xiaowen Chu. Irs: A large naturalistic indoor robotics stereo dataset to train deep models for disparity and surface normal estimation. In ICME, 2021.
+- [68] Qianqian Wang, Vickie Ye, Hang Gao, Jake Austin, Zhengqi Li, and Angjoo Kanazawa. Shape of motion: 4d reconstruction from a single video. arXiv:2407.13764, 2024.
+- [69] Ruicheng Wang, Sicheng Xu, Cassie Dai, Jianfeng Xiang, Yu Deng, Xin Tong, and Jiaolong Yang. Moge: Unlocking accurate monocular geometry estimation for open-domain images with optimal training supervision. arXiv:2410.19115, 2024.
+- [70] Shuzhe Wang et al. Dust3r: Geometric 3d vision made easy. In CVPR, 2024.
+- [71] Wenshan Wang et al. Tartanair: A dataset to push the limits of visual slam. In IROS, 2020.
+- [72] Yan Wang, Wei-Lun Chao, Divyansh Garg, Bharath Hariharan, Mark Campbell, and Kilian Q Weinberger. Pseudo-lidar from visual depth estimation: Bridging the gap in 3d object detection for autonomous driving. In CVPR, 2019.
+- [73] Yiran Wang et al. Neural video depth stabilizer. In ICCV, 2023.
+- [74] Menghan Xia, Xueting Liu, and Tien-Tsin Wong. Invertible grayscale. ACM TOG, 2018.
+- [75] Mingqing Xiao et al. Invertible image rescaling. In ECCV, 2020.
+- [76] Yuxi Xiao et al. Spatialtracker: Tracking any 2d pixels in 3d space. In CVPR, 2024.
+- [77] Tian-Xing Xu, Wenbo Hu, Yu-Kun Lai, Ying Shan, and Song-Hai Zhang. Texture-gs: Disentangling the geometry and texture for 3d gaussian splatting editing. In ECCV, 2024.
+- [78] Guorun Yang et al. Drivingstereo: A large-scale dataset for stereo matching in autonomous driving scenarios. In CVPR, 2019.
+- [79] Guanglei Yang et al. Transformer-based attention networks for continuous pixel-wise prediction. In ICCV, 2021.
+- [80] Honghui Yang et al. Depth any video with scalable synthetic data. arXiv:2410.10815, 2024.
+- [81] Lihe Yang et al. Depth anything: Unleashing the power of large-scale unlabeled data. In CVPR, 2024.
+- [82] Lihe Yang et al. Depth anything v2. NeurIPS, 2024.
+- [83] Rajeev Yasarla et al. Mamo: Leveraging memory and attention for monocular video depth estimation. In ICCV, 2023.
+- [84] Chandan Yeshwanth et al. Scannet++: A high-fidelity dataset of 3d indoor scenes. In ICCV, 2023.
+- [85] Wei Yin et al. Learning to recover 3d scene shape from a single image. In CVPR, 2021.
+- [86] Wei Yin et al. Towards accurate reconstruction of 3d scene shape from a single monocular image. IEEE TPAMI, 2022.
+- [87] Wei Yin et al. Metric3d: Towards zero-shot metric 3d prediction from a single image. In ICCV, 2023.
+- [88] Wangbo Yu et al. Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis. arXiv:2409.02048, 2024.
+- [89] Junyi Zhang et al. Monst3r: A simple approach for estimating geometry in the presence of motion. arXiv:2410.03825, 2024.
+- [90] Lvmin Zhang and Maneesh Agrawala. Transparent image layer diffusion using latent transparency. arXiv:2402.17113, 2024.
+- [91] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image diffusion models. In ICCV, 2023.
+- [92] Zhoutong Zhang et al. Consistent depth of moving objects in video. ACM TOG (SIGGRAPH), 2021.
+- [93] Sijie Zhao et al. Stereocrafter: Diffusion-based generation of long and high-fidelity stereoscopic 3d from monocular videos. arXiv:2409.07447, 2024.
+- [94] Jia Zheng et al. Structured3d: A large photo-realistic dataset for structured 3d modeling. In ECCV, 2020.
+- [95] Jiren Zhu et al. Hidden: Hiding data with deep networks. In ECCV, 2018.
 
 ---
 
@@ -292,14 +386,14 @@ The major limitation is expensive computation and memory cost due to large model
 
 ---
 
-![Supplemental Figure 1](https://replicate.delivery/xpbkg/N8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Supplemental Figure 1](images/supp_figure_1.png)
 **Figure 1. Visual results on Sora-generated videos. The rows from left to right are the input videos, the disparity maps and the point cloud of the first frame.**
 
-![Supplemental Figure 2](https://replicate.delivery/xpbkg/S8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Supplemental Figure 2](images/supp_figure_2.png)
 **Figure 2. Visual comparison with monocular geometry estimation methods. All point maps are converted to disparity maps for better visualization the sharpness of depth prediction.**
 
-![Supplemental Figure 3](https://replicate.delivery/xpbkg/U8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Supplemental Figure 3](images/supp_figure_3.png)
 **Figure 3. Visual results on DL3DV [45] with camera poses estimated from the output point maps. We concatenate 8 aligned point maps from the original point map sequence for visualization.**
 
-![Supplemental Figure 4](https://replicate.delivery/xpbkg/W8fGqfX6Y8vBVSf5V3o55w63q684f8X4V68f6Xf8X64fX8f6X/file.jpg)
+![Supplemental Figure 4](images/supp_figure_4.png)
 **Figure 4. Visual results on DAVIS [54] with camera poses estimated from the output point maps. We concatenate 8 aligned point maps from the original point map sequence for visualization.**
