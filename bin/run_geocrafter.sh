@@ -38,22 +38,14 @@ usage() {
     echo "Optional:"
     echo "  --output_dir DIR               Output directory (default: workspace/output)"
     echo "  --cache_dir DIR                Model cache directory (default: workspace/cache)"
-    echo "  --temp_dir DIR                 Temporary intermediate files (default: workspace/temp)"
-    echo "  --height H                     Target height (must be divisible by 64)"
-    echo "  --width W                      Target width (must be divisible by 64)"
-    echo "  --downsample_ratio RATIO       Downsample ratio (default: 1.0)"
-    echo "  --num_inference_steps N        Denoising steps (default: 5)"
-    echo "  --guidance_scale SCALE         Guidance scale (default: 1.0)"
-    echo "  --window_size SIZE             Processing window size (default: 110)"
-    echo "  --decode_chunk_size SIZE       Chunk size for decoding (default: 8)"
-    echo "  --overlap SIZE                 Overlap between windows (default: 25)"
-    echo "  --process_length LEN           Number of frames to process (default: -1, all)"
-    echo "  --process_stride STRIDE        Frame stride (default: 1)"
-    echo "  --seed SEED                    Random seed (default: 42)"
-    echo "  --model_type TYPE              Model type: 'diff' or 'determ' (default: diff)"
-    echo "  --no_force_projection          Disable forced projection"
-    echo "  --no_force_fixed_focal         Disable fixed focal length"
-    echo "  --use_extract_interp           Use exact interpolation"
+    echo "  --attention_mode MODE          Attention mode: auto, xformers, sdpa, slicing (default: auto)"
+    echo "  --cpu_offload                  Enable sequential CPU offload for UNet"
+    echo "  --residual_offload MODE        Residual offload mode: none, cpu, disk (default: cpu)"
+    echo "  --residual_cache_dir DIR       Directory for residual disk cache (default: temp/residuals)"
+    echo "  --no_vae_offloading            Disable VAE CPU offloading"
+    echo "  --no_inference_checkpointing   Disable inference gradient checkpointing"
+    echo "  --save_mp4                     Generate MP4 preview at the end (default: true)"
+    echo "  --no_save_mp4                  Disable MP4 generation"
     exit 1
 }
 
@@ -76,9 +68,17 @@ while [[ $# -gt 0 ]]; do
         --process_stride) PROCESS_STRIDE="$2"; shift 2 ;;
         --seed) SEED="$2"; shift 2 ;;
         --model_type) MODEL_TYPE="$2"; shift 2 ;;
+        --attention_mode) ATTENTION_MODE="$2"; shift 2 ;;
+        --cpu_offload) CPU_OFFLOAD=true; shift ;;
+        --residual_offload) RESIDUAL_OFFLOAD="$2"; shift 2 ;;
+        --residual_cache_dir) RESIDUAL_CACHE_DIR="$2"; shift 2 ;;
         --no_force_projection) FORCE_PROJECTION=false; shift ;;
         --no_force_fixed_focal) FORCE_FIXED_FOCAL=false; shift ;;
         --use_extract_interp) USE_EXTRACT_INTERP=true; shift ;;
+        --no_vae_offloading) ENABLE_VAE_OFFLOADING=false; shift ;;
+        --no_inference_checkpointing) ENABLE_INFERENCE_CHECKPOINTING=false; shift ;;
+        --save_mp4) SAVE_MP4=true; shift ;;
+        --no_save_mp4) SAVE_MP4=false; shift ;;
         -h|--help) usage ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
@@ -103,6 +103,16 @@ mkdir -p "$TEMP_DIR"
 # Get video basename for output naming
 VIDEO_BASENAME=$(basename "$VIDEO_PATH" | sed 's/\.[^.]*$//')
 
+# Initialize defaults for new arguments
+ATTENTION_MODE="${ATTENTION_MODE:-auto}"
+CPU_OFFLOAD="${CPU_OFFLOAD:-false}"
+RESIDUAL_OFFLOAD="${RESIDUAL_OFFLOAD:-cpu}"  # Default to cpu as requested
+RESIDUAL_CACHE_DIR="${RESIDUAL_CACHE_DIR:-$TEMP_DIR/residuals}"
+ENABLE_VAE_OFFLOADING="${ENABLE_VAE_OFFLOADING:-true}"
+ENABLE_INFERENCE_CHECKPOINTING="${ENABLE_INFERENCE_CHECKPOINTING:-true}"
+SAVE_MP4="${SAVE_MP4:-true}"
+
+# Display configuration
 echo "========================================"
 echo "GeometryCrafter Low-Memory Pipeline"
 echo "========================================"
@@ -110,6 +120,11 @@ echo "Video: $VIDEO_PATH"
 echo "Output: $OUTPUT_DIR"
 echo "Temp: $TEMP_DIR"
 echo "Model Type: $MODEL_TYPE"
+echo "Memory Optimization:"
+echo "  Attention: $ATTENTION_MODE"
+echo "  CPU Offload: $CPU_OFFLOAD"
+echo "  Residual Offload: $RESIDUAL_OFFLOAD"
+echo "  Residual Cache: $RESIDUAL_CACHE_DIR"
 echo "========================================"
 
 # Define intermediate directory paths (per-frame mode)
@@ -117,6 +132,11 @@ PRIORS_DIR="$TEMP_DIR/${VIDEO_BASENAME}_priors"
 CONTEXT_DIR="$TEMP_DIR/${VIDEO_BASENAME}_context"
 DENOISED_FILE="$TEMP_DIR/${VIDEO_BASENAME}_denoised.pt"
 VIDEO_INFO_FILE="$TEMP_DIR/${VIDEO_BASENAME}_video_info.pt"
+
+# Create residual cache directory if needed
+if [ "$RESIDUAL_OFFLOAD" = "disk" ]; then
+    mkdir -p "$RESIDUAL_CACHE_DIR"
+fi
 
 # Cleanup function
 cleanup() {
@@ -126,12 +146,21 @@ cleanup() {
         echo "ERROR OCCURRED - Debug Mode Active"
         echo "========================================"
         echo "Intermediate files preserved in: $TEMP_DIR"
+        echo "Residual cache preserved in: $RESIDUAL_CACHE_DIR"
         echo "Press ENTER to cleanup and exit, or Ctrl+C to keep files..."
         read -r
     fi
     echo ""
     echo "Cleaning up intermediate files..."
     rm -rf "$PRIORS_DIR" "$CONTEXT_DIR"
+    
+    # Clean up residual cache if it's within workspace/temp (or just generally if we created it)
+    # To be safe, we only delete it if we are using disk offload and it is inside our control
+    if [ "$RESIDUAL_OFFLOAD" = "disk" ] && [ -d "$RESIDUAL_CACHE_DIR" ]; then
+        echo "Cleaning up residual cache..."
+        rm -rf "$RESIDUAL_CACHE_DIR"
+    fi
+    
     rm -f "$DENOISED_FILE" "$VIDEO_INFO_FILE"
     echo "Cleanup complete."
 }
@@ -186,7 +215,11 @@ python bin/step3_denoise.py \
     --window_size "$WINDOW_SIZE" \
     --overlap "$OVERLAP" \
     --seed "$SEED" \
-    --model_type "$MODEL_TYPE"
+    --model_type "$MODEL_TYPE" \
+    --attention_mode "$ATTENTION_MODE" \
+    --residual_offload "$RESIDUAL_OFFLOAD" \
+    --residual_cache_dir "$RESIDUAL_CACHE_DIR" \
+    $( [ "$CPU_OFFLOAD" = "true" ] && echo "--cpu_offload" )
 
 if [ $? -ne 0 ]; then
     echo "Error: Step 3 failed"
@@ -205,11 +238,33 @@ python bin/step4_decode.py \
     --decode_chunk_size "$DECODE_CHUNK_SIZE" \
     --force_projection "$FORCE_PROJECTION" \
     --force_fixed_focal "$FORCE_FIXED_FOCAL" \
-    --use_extract_interp "$USE_EXTRACT_INTERP"
+    --use_extract_interp "$USE_EXTRACT_INTERP" \
+    --enable_vae_offloading "$ENABLE_VAE_OFFLOADING" \
+    --enable_inference_checkpointing "$ENABLE_INFERENCE_CHECKPOINTING"
 
 if [ $? -ne 0 ]; then
     echo "Error: Step 4 failed"
     exit 1
+fi
+
+# Step 5: Convert to MP4
+if [ "$SAVE_MP4" = "true" ]; then
+    echo ""
+    echo "==> Step 5/5: Generating MP4 Preview"
+    
+    OUTPUT_NPZ="$OUTPUT_DIR/${VIDEO_BASENAME}.npz"
+    OUTPUT_MP4="$OUTPUT_DIR/${VIDEO_BASENAME}.mp4"
+    
+    python bin/npz_to_mp4.py \
+        --npz_path "$OUTPUT_NPZ" \
+        --output_path "$OUTPUT_MP4" \
+        --fps 30
+        
+    if [ $? -ne 0 ]; then
+        echo "Warning: MP4 generation failed (but pipeline finished successfully)"
+    else
+        echo "MP4 saved to: $OUTPUT_MP4"
+    fi
 fi
 
 echo ""
