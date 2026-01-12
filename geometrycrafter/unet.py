@@ -102,6 +102,10 @@ class ResidualCache:
 class UNetSpatioTemporalConditionModelVid2vid(
     UNetSpatioTemporalConditionModel
 ):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gradient_checkpointing = False
+
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
 
