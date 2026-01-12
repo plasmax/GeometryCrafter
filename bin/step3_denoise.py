@@ -217,7 +217,7 @@ def main():
     parser.add_argument('--output_path', type=str, required=True, help='Output .pt file for denoised latents')
     parser.add_argument('--cache_dir', type=str, default='workspace/cache', help='Model cache directory')
     parser.add_argument('--num_inference_steps', type=int, default=5, help='Number of denoising steps')
-    parser.add_argument('--guidance_scale', type=float, default=1.0, help='Controls how closely the generated geometry follows the input video')
+    parser.add_argument('--guidance_scale', type=float, default=1.0, help='Value > 1.0 enables Classifier-Free Guidance (CFG), which biases the model towards the input video and extracted geometry priors')
     parser.add_argument('--window_size', type=int, default=110, help='Sliding window size')
     parser.add_argument('--overlap', type=int, default=25, help='Window overlap')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
