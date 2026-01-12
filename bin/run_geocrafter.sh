@@ -42,8 +42,9 @@ usage() {
     echo "  --cpu_offload                  Enable sequential CPU offload for UNet"
     echo "  --residual_offload MODE        Residual offload mode: none, cpu, disk (default: cpu)"
     echo "  --residual_cache_dir DIR       Directory for residual disk cache (default: temp/residuals)"
+    echo "  --enable_unet_checkpointing    Enable gradient checkpointing for UNet (reduces VRAM, may affect quality)"
     echo "  --no_vae_offloading            Disable VAE CPU offloading"
-    echo "  --no_inference_checkpointing   Disable inference gradient checkpointing"
+    echo "  --no_inference_checkpointing   Disable inference gradient checkpointing for VAE"
     echo "  --save_mp4                     Generate MP4 preview at the end (default: true)"
     echo "  --no_save_mp4                  Disable MP4 generation"
     exit 1
@@ -72,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         --cpu_offload) CPU_OFFLOAD=true; shift ;;
         --residual_offload) RESIDUAL_OFFLOAD="$2"; shift 2 ;;
         --residual_cache_dir) RESIDUAL_CACHE_DIR="$2"; shift 2 ;;
+        --enable_unet_checkpointing) ENABLE_UNET_CHECKPOINTING=true; shift ;;
         --no_force_projection) FORCE_PROJECTION=false; shift ;;
         --no_force_fixed_focal) FORCE_FIXED_FOCAL=false; shift ;;
         --use_extract_interp) USE_EXTRACT_INTERP=true; shift ;;
@@ -108,6 +110,7 @@ ATTENTION_MODE="${ATTENTION_MODE:-auto}"
 CPU_OFFLOAD="${CPU_OFFLOAD:-false}"
 RESIDUAL_OFFLOAD="${RESIDUAL_OFFLOAD:-cpu}"  # Default to cpu as requested
 RESIDUAL_CACHE_DIR="${RESIDUAL_CACHE_DIR:-$TEMP_DIR/residuals}"
+ENABLE_UNET_CHECKPOINTING="${ENABLE_UNET_CHECKPOINTING:-false}"  # Default false for quality
 ENABLE_VAE_OFFLOADING="${ENABLE_VAE_OFFLOADING:-true}"
 ENABLE_INFERENCE_CHECKPOINTING="${ENABLE_INFERENCE_CHECKPOINTING:-true}"
 SAVE_MP4="${SAVE_MP4:-true}"
@@ -219,7 +222,8 @@ python bin/step3_denoise.py \
     --attention_mode "$ATTENTION_MODE" \
     --residual_offload "$RESIDUAL_OFFLOAD" \
     --residual_cache_dir "$RESIDUAL_CACHE_DIR" \
-    $( [ "$CPU_OFFLOAD" = "true" ] && echo "--cpu_offload" )
+    $( [ "$CPU_OFFLOAD" = "true" ] && echo "--cpu_offload" ) \
+    $( [ "$ENABLE_UNET_CHECKPOINTING" = "true" ] && echo "--enable_unet_checkpointing" )
 
 if [ $? -ne 0 ]; then
     echo "Error: Step 3 failed"

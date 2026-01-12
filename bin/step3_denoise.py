@@ -247,6 +247,11 @@ def main():
         default=None,
         help='Directory for disk-based residual cache. Only used if --residual_offload=disk.'
     )
+    parser.add_argument(
+        '--enable_unet_checkpointing',
+        action='store_true',
+        help='Enable gradient checkpointing for UNet to reduce VRAM (may affect numerical stability).'
+    )
 
     args = parser.parse_args()
 
@@ -288,9 +293,10 @@ def main():
     )
     unet.requires_grad_(False)
 
-    # Enable gradient checkpointing to reduce activation memory (works in inference mode now)
-    unet.enable_gradient_checkpointing()
-    print("  UNet loaded with gradient checkpointing enabled (reduces VRAM by ~40%)")
+    # Optionally enable gradient checkpointing to reduce activation memory
+    if args.enable_unet_checkpointing:
+        unet.enable_gradient_checkpointing()
+        print("  UNet gradient checkpointing enabled (reduces VRAM by ~40%, may affect quality)")
 
     # Configure attention backend for lower VRAM
     def setup_attention():
