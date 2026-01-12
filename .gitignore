@@ -176,3 +176,5 @@ tmp*
 
 # pretrained
 /pretrained_models
+
+papers/*.pdf
