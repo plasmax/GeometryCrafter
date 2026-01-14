@@ -21,8 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from geometrycrafter import PMapAutoencoderKLTemporalDecoder
 
-offline_root = "/mnt/scratch/mlast/GeometryCrafter/pretrained_models"
-
 
 def resize_with_antialiasing(image, size):
     """Resize with antialiasing (from diffusers)."""
@@ -157,12 +155,12 @@ def main():
     # ==================================================
     print("\n[Encoding 1/3] Loading Image Encoder (CLIP)...")
     feature_extractor = CLIPImageProcessor.from_pretrained(
-        f"{offline_root}/stabilityai/stable-video-diffusion-img2vid-xt",
+        "stabilityai/stable-video-diffusion-img2vid-xt",
         subfolder="feature_extractor",
         cache_dir=args.cache_dir
     )
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-        f"{offline_root}/stabilityai/stable-video-diffusion-img2vid-xt",
+        "stabilityai/stable-video-diffusion-img2vid-xt",
         subfolder="image_encoder",
         torch_dtype=dtype,
         cache_dir=args.cache_dir
@@ -192,7 +190,7 @@ def main():
     # ==================================================
     print("\n[Encoding 2/3] Loading VAE...")
     vae = AutoencoderKLTemporalDecoder.from_pretrained(
-        f"{offline_root}/stabilityai/stable-video-diffusion-img2vid-xt",
+        "stabilityai/stable-video-diffusion-img2vid-xt",
         subfolder="vae",
         torch_dtype=torch.float16,
         cache_dir=args.cache_dir
@@ -224,7 +222,7 @@ def main():
     # ==================================================
     print("\n[Encoding 3/3] Loading PointMapVAE...")
     point_map_vae = PMapAutoencoderKLTemporalDecoder.from_pretrained(
-        f'{offline_root}/TencentARC/GeometryCrafter',
+        'TencentARC/GeometryCrafter',
         subfolder='point_map_vae',
         low_cpu_mem_usage=True,
         torch_dtype=torch.float32,
