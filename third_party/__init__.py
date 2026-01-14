@@ -9,10 +9,9 @@ class MoGe(nn.Module):
     
     def __init__(self, cache_dir):
         super().__init__()
-        model = "/mnt/scratch/mlast/GeometryCrafter/pretrained_models/Ruicheng/moge-vitl/model.pt"
         self.model = MoGeModel.from_pretrained(
-            model, # formerly 'Ruicheng/moge-vitl'
-            cache_dir=cache_dir).eval() 
+            'Ruicheng/moge-vitl', cache_dir=cache_dir).eval()
+
 
     @torch.no_grad()
     def forward_image(self, image: torch.Tensor, **kwargs):
