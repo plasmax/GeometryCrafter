@@ -35,43 +35,43 @@ CONTEXT_DIR="$TEMP_DIR/${VIDEO_BASENAME}_context"
 DENOISED_FILE="$TEMP_DIR/${VIDEO_BASENAME}_denoised.pt"
 VIDEO_INFO_FILE="$TEMP_DIR/${VIDEO_BASENAME}_video_info.pt"
 
-# # Step 1: Generate Geometry Priors (Per-Frame)
-# python bin/step1_priors.py \
-#   --video_path "$VIDEO_PATH" \
-#   --output_dir "$PRIORS_DIR" \
-#   --video_info_path "$VIDEO_INFO_FILE" \
-#   --cache_dir "$CACHE_DIR" \
-#   --height "$HEIGHT" \
-#   --width "$WIDTH" \
-#   --downsample_ratio "$DOWNSAMPLE_RATIO" \
-#   --process_length "$PROCESS_LENGTH" \
-#   --process_stride "$PROCESS_STRIDE"
+# Step 1: Generate Geometry Priors (Per-Frame)
+python bin/step1_priors.py \
+  --video_path "$VIDEO_PATH" \
+  --output_dir "$PRIORS_DIR" \
+  --video_info_path "$VIDEO_INFO_FILE" \
+  --cache_dir "$CACHE_DIR" \
+  --height "$HEIGHT" \
+  --width "$WIDTH" \
+  --downsample_ratio "$DOWNSAMPLE_RATIO" \
+  --process_length "$PROCESS_LENGTH" \
+  --process_stride "$PROCESS_STRIDE"
 
-# # Step 2: Encode Context (Per-Frame)
-# python bin/step2_encode.py \
-#   --video_path "$VIDEO_PATH" \
-#   --priors_dir "$PRIORS_DIR" \
-#   --video_info_path "$VIDEO_INFO_FILE" \
-#   --output_dir "$CONTEXT_DIR" \
-#   --cache_dir "$CACHE_DIR"
+# Step 2: Encode Context (Per-Frame)
+python bin/step2_encode.py \
+  --video_path "$VIDEO_PATH" \
+  --priors_dir "$PRIORS_DIR" \
+  --video_info_path "$VIDEO_INFO_FILE" \
+  --output_dir "$CONTEXT_DIR" \
+  --cache_dir "$CACHE_DIR"
 
-# # Step 3: Denoising (UNet) - Per-Frame Context Loading
-# python bin/step3_denoise.py \
-#   --context_dir "$CONTEXT_DIR" \
-#   --video_info_path "$VIDEO_INFO_FILE" \
-#   --output_path "$DENOISED_FILE" \
-#   --cache_dir "$CACHE_DIR" \
-#   --num_inference_steps "$NUM_INFERENCE_STEPS" \
-#   --guidance_scale "$GUIDANCE_SCALE" \
-#   --window_size "$WINDOW_SIZE" \
-#   --overlap "$OVERLAP" \
-#   --seed "$SEED" \
-#   --model_type "$MODEL_TYPE" \
-#   --attention_mode "$ATTENTION_MODE" \
-#   --residual_offload "$RESIDUAL_OFFLOAD" \
-#   --residual_cache_dir "$RESIDUAL_CACHE_DIR" \
-#   $( [ "$CPU_OFFLOAD" = "true" ] && echo "--cpu_offload" ) \
-#   $( [ "$ENABLE_UNET_CHECKPOINTING" = "true" ] && echo "--enable_unet_checkpointing" )
+# Step 3: Denoising (UNet) - Per-Frame Context Loading
+python bin/step3_denoise.py \
+  --context_dir "$CONTEXT_DIR" \
+  --video_info_path "$VIDEO_INFO_FILE" \
+  --output_path "$DENOISED_FILE" \
+  --cache_dir "$CACHE_DIR" \
+  --num_inference_steps "$NUM_INFERENCE_STEPS" \
+  --guidance_scale "$GUIDANCE_SCALE" \
+  --window_size "$WINDOW_SIZE" \
+  --overlap "$OVERLAP" \
+  --seed "$SEED" \
+  --model_type "$MODEL_TYPE" \
+  --attention_mode "$ATTENTION_MODE" \
+  --residual_offload "$RESIDUAL_OFFLOAD" \
+  --residual_cache_dir "$RESIDUAL_CACHE_DIR" \
+  $( [ "$CPU_OFFLOAD" = "true" ] && echo "--cpu_offload" ) \
+  $( [ "$ENABLE_UNET_CHECKPOINTING" = "true" ] && echo "--enable_unet_checkpointing" )
 
 # Step 4: Decode to Geometry Maps
 python bin/step4_decode.py \
@@ -87,11 +87,11 @@ python bin/step4_decode.py \
   --enable_vae_offloading "$ENABLE_VAE_OFFLOADING" \
   --enable_inference_checkpointing "$ENABLE_INFERENCE_CHECKPOINTING"
 
-# # Step 5: Convert to MP4
-# OUTPUT_NPZ="$OUTPUT_DIR/${VIDEO_BASENAME}.npz"
-# OUTPUT_MP4="$OUTPUT_DIR/${VIDEO_BASENAME}.mp4"
+# Step 5: Convert to MP4
+OUTPUT_NPZ="$OUTPUT_DIR/${VIDEO_BASENAME}.npz"
+OUTPUT_MP4="$OUTPUT_DIR/${VIDEO_BASENAME}.mp4"
 
-# python bin/npz_to_mp4.py \
-#   --npz_path "$OUTPUT_NPZ" \
-#   --output_path "$OUTPUT_MP4" \
-#   --fps 30
+python bin/npz_to_mp4.py \
+  --npz_path "$OUTPUT_NPZ" \
+  --output_path "$OUTPUT_MP4" \
+  --fps 30
