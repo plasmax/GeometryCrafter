@@ -47,7 +47,7 @@ Release Notes:
 ### Installation
 1. Clone this repo:
 ```bash
-git clone --recursive https://github.com/TencentARC/GeometryCrafter
+git clone --recursive https://github.com/plasmax/GeometryCrafter
 ```
 2. Install dependencies (please refer to [requirements.txt](requirements.txt)):
 ```bash
