@@ -3,6 +3,7 @@ set -u -o pipefail
 
 INPUT_DIR="/workspace/GeometryCrafter/workspace/inputs/trimmed"
 LOG_DIR="/workspace/GeometryCrafter/workspace/test_runs_$(date +%Y%m%d_%H%M%S)"
+DRY_RUN=0
 
 mkdir -p "$LOG_DIR"
 
@@ -15,6 +16,13 @@ if ! command -v python >/dev/null 2>&1; then
   echo "python not found in PATH." >&2
   exit 1
 fi
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "Unknown arg: $arg" >&2; exit 1 ;;
+  esac
+done
 
 # File-specific target sizes
 files=(
@@ -85,27 +93,35 @@ run_one() {
   local run_log="$LOG_DIR/${base}.log"
   local gpu_log="$LOG_DIR/${base}_gpu.csv"
 
-  echo "timestamp,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu" > "$gpu_log"
+  local mon_pid=""
+  if (( DRY_RUN == 0 )); then
+    echo "timestamp,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu" > "$gpu_log"
 
-  # Start GPU monitor in the background.
-  (
-    while true; do
-      local ts
-      ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-      nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu \
-        --format=csv,noheader,nounits | awk -v ts="$ts" '{print ts","$0}'
-      sleep 1
-    done
-  ) >> "$gpu_log" &
-  local mon_pid=$!
+    # Start GPU monitor in the background.
+    (
+      while true; do
+        local ts
+        ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu \
+          --format=csv,noheader,nounits | awk -v ts="$ts" '{print ts","$0}'
+        sleep 1
+      done
+    ) >> "$gpu_log" &
+    mon_pid=$!
+  fi
 
   local cmd=(python run.py "$input" --width "$width" --height "$height")
+  # TODO: add a post-processing step to each run to convert .npz to .mp4 for easier viewing, e.g. ./bin/npz_to_mp4.py --npz_path workspace/output/6296696-uhd_2560_1080_25fps_4s.npz --output_path workspace/output/6296696-uhd_2560_1080_25fps_4s.mp4
   echo "Running: ${cmd[*]}" | tee -a "$run_log"
-  "${cmd[@]}" >> "$run_log" 2>&1
-  local status=$?
+  if (( DRY_RUN == 1 )); then
+    local status=0
+  else
+    "${cmd[@]}" >> "$run_log" 2>&1
+    local status=$?
 
-  kill "$mon_pid" 2>/dev/null || true
-  wait "$mon_pid" 2>/dev/null || true
+    kill "$mon_pid" 2>/dev/null || true
+    wait "$mon_pid" 2>/dev/null || true
+  fi
 
   echo "exit_status=$status" | tee -a "$run_log"
   return "$status"
