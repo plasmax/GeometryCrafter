@@ -15,6 +15,10 @@ source .venv/bin/activate
 pip install uv
 uv pip install -r requirements.txt 
 
+# pull dataset from gdrive
 # runpodctl receive 4080-viva-respond-eternal-8
+
+# run the batch processing script
+# scripts/run_batch_with_gpu.sh
 
 history > session_history.sh
