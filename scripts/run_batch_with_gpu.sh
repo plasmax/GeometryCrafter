@@ -35,39 +35,6 @@ files=(
   "8466293-uhd_3840_2160_25fps_4s.mp4"
 )
 
-calc_dims() {
-  local orig_width="$1"
-  local orig_height="$2"
-  local target_width=1024
-
-  if (( orig_width < target_width )); then
-    target_width="$orig_width"
-  fi
-
-  local target_height
-  target_height=$(awk -v ow="$orig_width" -v oh="$orig_height" -v tw="$target_width" 'BEGIN {
-    raw = oh * tw / ow
-    m = 64
-    lower = int(raw / m) * m
-    upper = lower + m
-    if ((raw - lower) <= (upper - raw)) h = lower
-    else h = upper
-    if (h < m) h = m
-    printf "%d", h
-  }')
-
-  echo "$target_width $target_height"
-}
-
-get_target_dims() {
-  local name="$1"
-  if [[ "$name" =~ _([0-9]+)_([0-9]+)_ ]]; then
-    calc_dims "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-  else
-    echo ""
-  fi
-}
-
 run_one() {
   local filename="$1"
   local input="$INPUT_DIR/$filename"
@@ -76,16 +43,6 @@ run_one() {
     echo "Missing input: $input" >&2
     return 1
   fi
-
-  local dims
-  dims=$(get_target_dims "$filename")
-  if [[ -z "$dims" ]]; then
-    echo "No target dims for: $filename" >&2
-    return 1
-  fi
-
-  local width height
-  read -r width height <<< "$dims"
 
   local base
   base=$(basename "$filename" .mp4)
@@ -110,8 +67,10 @@ run_one() {
     mon_pid=$!
   fi
 
-  local cmd=(python run.py "$input" --width "$width" --height "$height")
-  # TODO: add a post-processing step to each run to convert .npz to .mp4 for easier viewing, e.g. ./bin/npz_to_mp4.py --npz_path workspace/output/6296696-uhd_2560_1080_25fps_4s.npz --output_path workspace/output/6296696-uhd_2560_1080_25fps_4s.mp4
+  local cmd=(python run.py "$input" --downsample_ratio 2)
+  local npz_path="/workspace/GeometryCrafter/workspace/output/${base}.npz"
+  local mp4_path="/workspace/GeometryCrafter/workspace/output/${base}.mp4"
+  local post_cmd=(./bin/npz_to_mp4.py --npz_path "$npz_path" --output_path "$mp4_path")
   echo "Running: ${cmd[*]}" | tee -a "$run_log"
   if (( DRY_RUN == 1 )); then
     local status=0
@@ -121,6 +80,11 @@ run_one() {
 
     kill "$mon_pid" 2>/dev/null || true
     wait "$mon_pid" 2>/dev/null || true
+  fi
+
+  if (( DRY_RUN == 0 )) && (( status == 0 )) && [[ -f "$npz_path" ]]; then
+    echo "Post-processing: ${post_cmd[*]}" | tee -a "$run_log"
+    "${post_cmd[@]}" >> "$run_log" 2>&1
   fi
 
   echo "exit_status=$status" | tee -a "$run_log"
