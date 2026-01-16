@@ -90,12 +90,28 @@ def main(
     if height is None or width is None:
         height = original_height
         width = original_width
-    
-    assert height % 64 == 0
-    assert width % 64 == 0
 
-    frames_idx = list(range(0, len(vid), process_stride))
-    frames = vid.get_batch(frames_idx).asnumpy().astype(np.float32) / 255.0
+    # apply dwnsample ratio first
+    height = int(height / downsample_ratio)
+    width = int(width / downsample_ratio)
+    
+    if height % 64 != 0:
+        height = max(64, height & ~63)
+    if width % 64 != 0:
+        width = max(64, width & ~63)
+
+    if height != original_height or width != original_width:
+        # Decode at target resolution to avoid loading full-res frames into RAM.
+        vid = VideoReader(video_path, ctx=cpu(0), width=width, height=height)
+        original_height, original_width = height, width
+
+    total_frames = len(vid)
+    if process_length > 0:
+        max_index = min(total_frames, (process_length - 1) * process_stride + 1)
+    else:
+        max_index = total_frames
+    frames_idx = list(range(0, max_index, process_stride))
+    frames = vid.get_batch(frames_idx).asnumpy()
     if process_length > 0:
         process_length = min(process_length, len(frames))
         frames = frames[:process_length]
@@ -104,7 +120,10 @@ def main(
     window_size = min(window_size, process_length)
     if window_size == process_length: 
         overlap = 0
-    frames_tensor = torch.tensor(frames.astype("float32"), device='cuda').float().permute(0, 3, 1, 2)
+    frames_tensor = torch.from_numpy(frames).to(device='cuda', dtype=torch.float32)
+    frames_tensor.div_(255.0)
+    frames_tensor = frames_tensor.permute(0, 3, 1, 2)
+    del frames
     # t,3,h,w
 
     if downsample_ratio > 1.0:
