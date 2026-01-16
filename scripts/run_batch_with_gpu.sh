@@ -27,18 +27,37 @@ files=(
   "8466293-uhd_3840_2160_25fps_4s.mp4"
 )
 
+calc_dims() {
+  local orig_width="$1"
+  local orig_height="$2"
+  local target_width=1024
+
+  if (( orig_width < target_width )); then
+    target_width="$orig_width"
+  fi
+
+  local target_height
+  target_height=$(awk -v ow="$orig_width" -v oh="$orig_height" -v tw="$target_width" 'BEGIN {
+    raw = oh * tw / ow
+    m = 64
+    lower = int(raw / m) * m
+    upper = lower + m
+    if ((raw - lower) <= (upper - raw)) h = lower
+    else h = upper
+    if (h < m) h = m
+    printf "%d", h
+  }')
+
+  echo "$target_width $target_height"
+}
+
 get_target_dims() {
   local name="$1"
-  case "$name" in
-    12525562-uhd_3840_2160_60fps_4s.mp4) echo "3840 2176" ;;
-    15101060_3840_2160_30fps_4s.mp4)     echo "3840 2176" ;;
-    15102897_2560_1440_60fps_4s.mp4)     echo "2560 1408" ;;
-    3111683-uhd_3840_2160_25fps_4s.mp4)  echo "3840 2176" ;;
-    6296696-uhd_2560_1080_25fps_4s.mp4)  echo "2560 1088" ;;
-    6789663-hd_4096_2160_25fps_4s.mp4)   echo "4096 2176" ;;
-    8466293-uhd_3840_2160_25fps_4s.mp4)  echo "3840 2176" ;;
-    *) echo "" ;;
-  esac
+  if [[ "$name" =~ _([0-9]+)_([0-9]+)_ ]]; then
+    calc_dims "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  else
+    echo ""
+  fi
 }
 
 run_one() {
