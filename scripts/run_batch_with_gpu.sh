@@ -80,8 +80,9 @@ run_one() {
   ) >> "$gpu_log" &
   local mon_pid=$!
 
-  echo "Running: $input (target ${width}x${height})" | tee -a "$run_log"
-  python run.py --input_video "$input" --width "$width" --height "$height" >> "$run_log" 2>&1
+  local cmd=(python run.py "$input" --width "$width" --height "$height")
+  echo "Running: ${cmd[*]}" | tee -a "$run_log"
+  "${cmd[@]}" >> "$run_log" 2>&1
   local status=$?
 
   kill "$mon_pid" 2>/dev/null || true
