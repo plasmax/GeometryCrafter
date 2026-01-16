@@ -91,14 +91,20 @@ def main(
         height = original_height
         width = original_width
 
+    print("Input video resolution:", original_width, original_height)
+
     # apply dwnsample ratio first
     height = int(height / downsample_ratio)
     width = int(width / downsample_ratio)
+
+    print("Target processing resolution:", width, height)
     
     if height % 64 != 0:
         height = max(64, height & ~63)
     if width % 64 != 0:
         width = max(64, width & ~63)
+
+    print("Adjusted processing resolution to a multiple of 64:", width, height)
 
     if height != original_height or width != original_width:
         # Decode at target resolution to avoid loading full-res frames into RAM.

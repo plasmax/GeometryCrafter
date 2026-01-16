@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+"""Convert .npz file with point_map and mask to MP4 video showing depth."""
 import numpy as np
 import cv2
 import argparse
